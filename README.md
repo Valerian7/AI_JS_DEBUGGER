@@ -20,7 +20,7 @@
 
 ## 视频演示
 
-[![](https://i.postimg.cc/0ycFpTyJ/i-Shot-2025-03-18-11-41-01.png)](https://www.bilibili.com/video/BV1kPXGYVEkj)
+[![](https://i.postimg.cc/0ycFpTyJ/i-Shot-2025-03-18-11-41-01.png)](https://player.bilibili.com/player.html?isOutside=true&aid=114181269363837&bvid=BV1kPXGYVEkj&cid=28924709737&p=1)
 
 ## 安装
 
