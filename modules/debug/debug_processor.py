@@ -5,41 +5,74 @@ from modules.utils import get_cached_script_source, set_cached_script_source, me
 
 
 async def set_xhr_breakpoint(client, xhr_url="*"):
-    # 设置XHR断点
+    """设置XHR请求断点
+    
+    Args:
+        client: CDP客户端会话
+        xhr_url: 要监听的XHR请求URL，默认为"*"表示监听所有XHR请求
+        
+    注意:
+        - 当XHR请求匹配指定URL时，浏览器会暂停JavaScript执行
+        - 空字符串或"*"表示监听所有XHR请求
+        - URL可以是部分匹配，不需要完全一致
+    """
+    # 通过CDP命令设置XHR断点
     client.send("DOMDebugger.setXHRBreakpoint", {"url": xhr_url})
     print(f"✅ 已设置XHR断点，监听URL: {xhr_url if xhr_url else '所有XHR请求'}")
+    # 注意：此函数不等待断点触发，只是设置断点
 
 async def set_xhr_new_breakpoint(client, xhr_url, js_ready_event=None):
+    """等待XHR断点触发并设置新的JS断点
+    
+    此函数实现了一个高级功能：当XHR断点触发时，自动在触发位置设置一个新的JS断点，
+    然后移除原始XHR断点，并通知调试器可以开始监听新设置的JS断点。
+    
+    Args:
+        client: CDP客户端会话
+        xhr_url: 要监听的XHR请求URL
+        js_ready_event: 可选的事件对象，用于通知调试器JS断点已准备就绪
+        
+    Returns:
+        无返回值，但会设置js_ready_event事件（如果提供）
+        
+    Raises:
+        Exception: 在断点处理过程中发生错误时抛出异常
+    """
     print("等待XHR断点触发...")
 
+    # 创建Future对象，用于异步等待断点触发事件
     event_future = asyncio.get_event_loop().create_future()
 
+    # 定义断点暂停事件处理函数
     def paused_handler(event):
+        # 只有在Future未完成时才设置结果，防止多次触发
         if not event_future.done():
             event_future.set_result(event)
 
     try:
-        # 注册事件监听器
+        # 注册Debugger.paused事件监听器
         client.on('Debugger.paused', paused_handler)
         
         # 等待XHR断点触发
         try:
+            # 阻塞等待，直到断点被触发
             event = await event_future
             print("XHR断点已触发！")
         except Exception as e:
             print(f"等待XHR断点触发时出错: {e}")
             raise
 
-        # 获取调用堆栈
+        # 分析断点触发位置的调用堆栈
         call_stack = event['callFrames']
-        top_call = call_stack[-1]  # 最顶层堆栈
+        top_call = call_stack[-1]  # 获取最顶层堆栈帧（实际执行位置）
 
+        # 提取断点位置信息
         location = top_call['location']
-        script_id = location['scriptId']
-        line_number = location['lineNumber']
-        column_number = location['columnNumber']
+        script_id = location['scriptId']  # 脚本ID
+        line_number = location['lineNumber']  # 行号（0-based）
+        column_number = location['columnNumber']  # 列号（0-based）
 
-        # 设置新的JS断点
+        # 在当前位置设置新的JS断点
         try:
             await client.send("Debugger.setBreakpoint", {
                 "location": {
@@ -48,12 +81,13 @@ async def set_xhr_new_breakpoint(client, xhr_url, js_ready_event=None):
                     "columnNumber": column_number
                 }
             })
+            # 显示行号时+1转换为1-based（用户友好的行号）
             print(f"✅ 已在顶层调用堆栈位置设置新的JS断点: 行 {line_number + 1}, 列 {column_number + 1}")
         except Exception as e:
             print(f"设置JS断点时出错: {e}")
             raise
 
-        # 移除XHR断点
+        # 移除原始XHR断点，避免重复触发
         try:
             await client.send("DOMDebugger.removeXHRBreakpoint", {"url": xhr_url})
             print("✅ 已移除XHR断点")
@@ -71,7 +105,7 @@ async def set_xhr_new_breakpoint(client, xhr_url, js_ready_event=None):
             print(f"恢复执行时出错: {e}")
             # 仍然设置事件，让AI调试器继续
 
-        # 告诉continuous_debugging可以开始等待JS断点事件了
+        # 通知continuous_debugging可以开始等待JS断点事件了
         if js_ready_event:
             js_ready_event.set()
             
@@ -79,31 +113,54 @@ async def set_xhr_new_breakpoint(client, xhr_url, js_ready_event=None):
         print(f"XHR断点处理过程中发生错误: {e}")
         raise
     finally:
-        # 确保总是移除事件监听器
+        # 确保总是移除事件监听器，防止内存泄漏
         client.remove_listener('Debugger.paused', paused_handler)
 
 
 async def set_breakpoint(client, url_or_regex, line_number=0, column_number=0, condition="", is_regex=False):
+    """在指定URL或匹配正则表达式的JavaScript文件中设置断点
+    
+    Args:
+        client: CDP客户端会话
+        url_or_regex: JavaScript文件的URL或URL正则表达式
+        line_number: 断点行号（0-based，显示时会+1）
+        column_number: 断点列号（0-based，显示时会+1）
+        condition: 可选的断点条件表达式，只有表达式为true时断点才会触发
+        is_regex: 是否将url_or_regex作为正则表达式处理
+        
+    Returns:
+        dict: 包含断点ID和实际位置的结果对象
+        
+    Raises:
+        Exception: 设置断点失败时抛出异常，但会被捕获并打印错误信息
+    """
     try:
+        # 根据is_regex参数决定使用urlRegex还是url参数
         if is_regex:
+            # 使用正则表达式匹配URL
             result = await client.send("Debugger.setBreakpointByUrl", {
-                "urlRegex": url_or_regex,
-                "lineNumber": line_number,
-                "columnNumber": column_number,
-                "condition": condition
+                "urlRegex": url_or_regex,  # URL正则表达式
+                "lineNumber": line_number,  # 行号（0-based）
+                "columnNumber": column_number,  # 列号（0-based）
+                "condition": condition  # 断点条件
             })
+            # 显示行号和列号时+1转换为1-based（用户友好的行列号）
             print(f"✅ 已通过正则 {url_or_regex} 在行 {line_number+1}, 列 {column_number+1} 设置断点")
         else:
+            # 使用精确URL匹配
             result = await client.send("Debugger.setBreakpointByUrl", {
-                "url": url_or_regex,
-                "lineNumber": line_number,
-                "columnNumber": column_number,
-                "condition": condition
+                "url": url_or_regex,  # 精确URL
+                "lineNumber": line_number,  # 行号（0-based）
+                "columnNumber": column_number,  # 列号（0-based）
+                "condition": condition  # 断点条件
             })
+            # 显示行号和列号时+1转换为1-based（用户友好的行列号）
             print(f"✅ 已在 {url_or_regex}, 行 {line_number+1}, 列 {column_number+1} 设置断点")
         return result
     except Exception as e:
         print(f"❌ 设置断点失败: {e}")
+        # 返回None表示设置失败
+        return None
 
 def should_skip_property(name: str, value_obj: dict) -> bool:
     """判断属性是否应被跳过（跳过不必要的数据）"""

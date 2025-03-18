@@ -16,7 +16,7 @@
 
 - Python 3.8+
 - Google Chrome浏览器
-- 大模型API密钥
+- 大模型API密钥（支持通义千问、GPT、Deepseek、文心ERNIE、讯飞星火）
 
 ## 视频演示
 
@@ -48,12 +48,56 @@ executable_path = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
 
 4. 配置API密钥：
 
-在`ai/api/qwen_api.py`中，替换示例API密钥为自己的大模型API密钥（目前只支持[通义千问](https://bailian.console.aliyun.com/#/home)）：
+根据您选择的大模型，在相应的API文件中配置密钥：
 
+- 通义千问（默认）：在`ai_debugger/api/qwen_api.py`中配置
 ```python
 client = OpenAI(
     api_key="your-api-key-here",
     base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+)
+```
+
+- GPT：在`ai_debugger/api/gpt_api.py`中配置
+```python
+# 默认使用官方API
+use_third_party_api = False  # 设置为True启用第三方API
+third_party_base_url = "https://your-third-party-api.com/v1"  # 第三方API地址
+
+# 配置客户端
+if use_third_party_api and third_party_base_url:
+    client = OpenAI(
+        api_key="your-api-key-here",
+        base_url=third_party_base_url,
+    )
+else:
+    client = OpenAI(
+        api_key="your-api-key-here",
+        # 使用官方API地址，无需设置base_url
+    )
+```
+
+- Deepseek：在`ai_debugger/api/deepseek_api.py`中配置
+```python
+client = OpenAI(
+    api_key="your-api-key-here",
+    base_url="https://api.deepseek.com/v1",
+)
+```
+
+- 文心ERNIE：在`ai_debugger/api/ernie_api.py`中配置
+```python
+client = OpenAI(
+    api_key="your-api-key-here",
+    base_url="https://aip.baidubce.com/rpc/2.0/ai_custom/v1/wenxinworkshop/chat/completions",
+)
+```
+
+- 讯飞星火：在`ai_debugger/api/spark_api.py`中配置
+```python
+client = OpenAI(
+    api_key="your-api-key-here",
+    base_url="https://api.xfyun.cn/v2.1/chat",
 )
 ```
 
@@ -62,14 +106,21 @@ client = OpenAI(
 1. 运行主程序：
 
 ```bash
-python mian.py
+python main.py
 ```
 
-2. 选择断点模式：
-   - `js`: 使用JavaScript文件路径和行号设置断点
-   - `xhr`: 设置XHR请求断点
+2. 选择断点模式和大模型API：
+   - 断点模式：
+     - `js`: 使用JavaScript文件路径和行号设置断点
+     - `xhr`: 设置XHR请求断点
+   - 大模型API：
+     - `qwen`: 使用通义千问API（默认）
+     - `gpt`: 使用OpenAI GPT API
+     - `deepseek`: 使用Deepseek API
+     - `ernie`: 使用百度文心ERNIE API
+     - `spark`: 使用讯飞星火API
 
-2. 按照提示输入断点信息
+3. 按照提示输入断点信息
 
 ### JS断点示例
 
@@ -96,4 +147,4 @@ FAQ：若JS被压缩成一行，则断点行数为0行
 
 ## 许可证
 
-本项目采用MIT许可证 - 详情请查看[LICENSE](LICENSE)文件。 
+本项目采用MIT许可证 - 详情请查看[LICENSE](LICENSE)文件。

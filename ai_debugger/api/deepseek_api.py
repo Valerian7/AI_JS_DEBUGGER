@@ -5,9 +5,10 @@ from openai import OpenAI
 from .base_api import BaseAPI
 from .prompt_templates import DEBUG_INSTRUCTION_PROMPT, DEBUGGER_ANALYZE_PROMPT, SYSTEM_ROLE_PROMPT
 
+# 初始化OpenAI客户端（Deepseek使用OpenAI兼容接口）
 client = OpenAI(
-    api_key="sk-xxxx", # 如何获取API Key：https://help.aliyun.com/zh/model-studio/developer-reference/get-api-key
-    base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+    api_key="sk-xxxx", # 替换为你的Deepseek API Key
+    base_url="https://api.deepseek.com/v1", # Deepseek API地址
 )
 
 
@@ -16,7 +17,7 @@ def get_debug_instruction(step_output: str) -> str:
     compressed_info = " ".join(step_output.split())
     
     completion = client.chat.completions.create(
-    model="qwen-turbo", 
+    model="deepseek-chat", # Deepseek的基础对话模型
     messages=[{
         'role': 'system', 
         'content': DEBUG_INSTRUCTION_PROMPT},
@@ -43,13 +44,16 @@ def get_debug_instruction(step_output: str) -> str:
 
 def debugger_analyze(path):
     path = Path(path)
-    file_object = client.files.create(file=path, purpose="file-extract")
+    
+    # 读取文件内容
+    with open(path, 'r', encoding='utf-8') as f:
+        file_content = f.read()
     
     completion = client.chat.completions.create(
-        model="qwen-long",
+        model="deepseek-coder", # 使用Deepseek的代码模型进行分析
         messages=[
-            {'role': 'system', 'content': f'fileid://{file_object.id}'},
-            {'role': 'user', 'content': DEBUGGER_ANALYZE_PROMPT}
+            {'role': 'system', 'content': SYSTEM_ROLE_PROMPT},
+            {'role': 'user', 'content': f'{DEBUGGER_ANALYZE_PROMPT}\n\n{file_content}'}
         ],
         stream=False  
     )

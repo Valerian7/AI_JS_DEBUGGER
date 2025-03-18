@@ -5,10 +5,22 @@ from openai import OpenAI
 from .base_api import BaseAPI
 from .prompt_templates import DEBUG_INSTRUCTION_PROMPT, DEBUGGER_ANALYZE_PROMPT, SYSTEM_ROLE_PROMPT
 
-client = OpenAI(
-    api_key="sk-xxxx", # 如何获取API Key：https://help.aliyun.com/zh/model-studio/developer-reference/get-api-key
-    base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
-)
+# 初始化OpenAI客户端
+# 默认使用官方API
+use_third_party_api = False  # 是否使用第三方API
+third_party_base_url = ""    # 第三方API的base_url
+
+# 配置客户端
+if use_third_party_api and third_party_base_url:
+    client = OpenAI(
+        api_key="sk-xxxx",  # 替换为你的API Key
+        base_url=third_party_base_url,  # 第三方API地址
+    )
+else:
+    client = OpenAI(
+        api_key="sk-xxxx",  # 替换为你的OpenAI API Key
+        # 使用官方API地址，无需设置base_url
+    )
 
 
 def get_debug_instruction(step_output: str) -> str:
@@ -16,7 +28,7 @@ def get_debug_instruction(step_output: str) -> str:
     compressed_info = " ".join(step_output.split())
     
     completion = client.chat.completions.create(
-    model="qwen-turbo", 
+    model="gpt-3.5-turbo", # 可以根据需要选择不同的模型
     messages=[{
         'role': 'system', 
         'content': DEBUG_INSTRUCTION_PROMPT},
@@ -43,13 +55,16 @@ def get_debug_instruction(step_output: str) -> str:
 
 def debugger_analyze(path):
     path = Path(path)
-    file_object = client.files.create(file=path, purpose="file-extract")
+    
+    # 读取文件内容
+    with open(path, 'r', encoding='utf-8') as f:
+        file_content = f.read()
     
     completion = client.chat.completions.create(
-        model="qwen-long",
+        model="gpt-4", # 使用功能更强大的GPT-4模型进行分析
         messages=[
-            {'role': 'system', 'content': f'fileid://{file_object.id}'},
-            {'role': 'user', 'content': DEBUGGER_ANALYZE_PROMPT}
+            {'role': 'system', 'content': SYSTEM_ROLE_PROMPT},
+            {'role': 'user', 'content': f'{DEBUGGER_ANALYZE_PROMPT}\n\n{file_content}'}
         ],
         stream=False  
     )
