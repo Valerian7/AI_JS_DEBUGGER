@@ -37,7 +37,7 @@ cd js-debugger-ai
 pip install -r requirements.txt
 ```
 
-3. 配置Chrome路径：
+3. 配置Chrome：
 
 在`main.py`中，替换chrome浏览器路径：
 ```Python
