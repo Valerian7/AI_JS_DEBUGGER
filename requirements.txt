@@ -1,0 +1,5 @@
+pyppeteer>=1.0.2
+openai>=1.1.0
+jsbeautifier>=1.14.7
+asyncio>=3.4.3
+aiohttp>=3.8.4 
