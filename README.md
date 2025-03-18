@@ -20,7 +20,7 @@
 
 ## 视频演示
 
-
+[![](https://i.postimg.cc/0ycFpTyJ/i-Shot-2025-03-18-11-41-01.png)](https://www.bilibili.com/video/BV1kPXGYVEkj)
 
 ## 安装
 
