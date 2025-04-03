@@ -15,7 +15,10 @@
 ## 环境要求
 
 - Python 3.8+
-- Google Chrome浏览器
+- 支持的浏览器（至少安装一种）：
+  - Google Chrome浏览器
+  - Mozilla Firefox浏览器
+  - Microsoft Edge浏览器
 - 大模型API密钥（支持通义千问、GPT、Deepseek、文心ERNIE、讯飞星火）
 
 ## 视频演示
@@ -37,13 +40,24 @@ cd js-debugger-ai
 pip install -r requirements.txt
 ```
 
-3. 配置Chrome：
+3. 浏览器配置：
 
-在`main.py`中，替换chrome浏览器路径：
+程序支持Chrome、Firefox和Edge浏览器。运行时会提示选择浏览器类型，并自动查找浏览器的默认安装路径。
+
+如需手动指定浏览器路径，可在`main.py`中取消注释相应的路径配置：
+
 ```Python
-executable_path = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+# Chrome路径
+#executable_path = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'  # macOS路径
+#executable_path = r'C:\Program Files\Google\Chrome\Application\chrome.exe'  # Windows路径
 
-#executable_path = r'C:\Program Files\Google\Chrome\Application\chrome.exe'
+# Firefox路径
+#executable_path = '/Applications/Firefox.app/Contents/MacOS/firefox'  # macOS路径
+#executable_path = r'C:\Program Files\Mozilla Firefox\firefox.exe'  # Windows路径
+
+# Edge路径
+#executable_path = '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge'  # macOS路径
+#executable_path = r'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe'  # Windows路径
 ```
 
 4. 配置API密钥：
