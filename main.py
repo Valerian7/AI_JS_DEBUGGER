@@ -125,6 +125,9 @@ async def main():
         executable_path = input("浏览器可执行文件路径: ")
     else:
         print(f"✅ 已自动检测到浏览器路径: {executable_path}")
+
+    # 获取用户选择的浏览器类型
+    browser_type = input("请选择使用的浏览器类型(chrome/firefox/edge)，默认为chrome: ") or "chrome"
     
     # 启动浏览器并创建 CDP 会话
     client = await CDPClient.launch_browser_and_create_client(
@@ -136,9 +139,6 @@ async def main():
     
     # 获取用户选择的断点模式
     breakpoint_mode = input("请选择断点模式(js/xhr): ")
-    
-    # 获取用户选择的浏览器类型
-    browser_type = input("请选择使用的浏览器类型(chrome/firefox/edge)，默认为chrome: ") or "chrome"
     
     # 获取用户选择的大模型类型
     model_type = input("请选择使用的大模型API(qwen/gpt/deepseek/ernie/spark)，默认为qwen: ") or "qwen"
