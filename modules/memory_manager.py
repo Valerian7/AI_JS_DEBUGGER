@@ -65,7 +65,7 @@ class MemoryManager:
                 memory_percent = memory_info['percent']
                 
                 # 记录内存使用情况
-                if memory_percent > 50:
+                if memory_percent > 70:
                     logger.info(f"当前内存使用: {memory_percent:.1f}%, {memory_info['used_mb']:.1f}MB / {memory_info['total_mb']:.1f}MB")
                 
                 # 如果内存使用超过阈值，触发清理
