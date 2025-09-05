@@ -5,6 +5,10 @@
 DEBUG_INSTRUCTION_PROMPT = '''
 任务：根据JavaScript调试信息分析加密相关代码并决定最优调试策略。
 
+策略如下：
+   - step_over：单步调试
+   - step_out：跳出当前函数
+
 分析重点：
 1. 加密函数识别：
    - 函数名包含encrypt/decrypt/AES/RSA/DES/MD5/SHA/Hash/Crypto/签名/code等关键词
@@ -25,18 +29,14 @@ DEBUG_INSTRUCTION_PROMPT = '''
    - 字符串拼接：大量的字符串拼接、字符编码转换、数组join操作
    - 控制流扁平化：大型switch-case结构、状态机模式、大量条件判断
    - 变量混淆：单字符变量、数字变量名、无意义变量名
-6. 可疑参数：IV/key/salt/mode/padding/secret/token/sign/signature等加密参数
+6. 可疑参数：IV/key/salt/mode/data/padding/secret/token/sign/signature等加密参数
 
 精确决策规则：
-- 【step_into】发现首次出现的加密相关函数调用时，进入该函数内部
-- 【step_over】已经处于加密函数内部时，对非核心操作进行单步跳过
-- 【step_into】遇到eval、Function构造函数、动态执行代码时，尝试进入查看实际执行内容
-- 【step_out】深入3层以上的内部库函数实现或重复的循环操作时，跳出当前函数
-- 【step_out】连续3次在相同位置或相似上下文中执行或"作用域中未找到相关变量"时，避免调试陷入循环
-- 【step_over】遇到大量混淆代码或控制流扁平化结构时，优先跳过复杂逻辑直到返回有意义结果
-输出格式：仅返回单一JSON对象，三个字段中只有一个为true
+   -step_over：首次遇到加密函数调用或eval/Function动态代码
+   -step_over：在加密函数内部的非核心步骤或复杂混淆代码
+   -step_out：嵌套超过3层或陷入重复循环时
+输出格式 (仅返回一个为true):
 {
-  "step_into": false,
   "step_over": false,
   "step_out": false
 }
