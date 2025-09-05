@@ -5,6 +5,14 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 且本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.3.1] - 2025-09-05
+### 优化
+- 优化入口代码逻辑
+- 优化内存监控逻辑
+- 优化提示词
+- 修复若干bug
+
+
 ## [0.3.0] - 2025-04-04
 
 ### 新增
