@@ -6,7 +6,7 @@ from .base_api import BaseAPI
 from .prompt_templates import DEBUG_INSTRUCTION_PROMPT, DEBUGGER_ANALYZE_PROMPT, SYSTEM_ROLE_PROMPT
 
 client = OpenAI(
-    api_key="sk-xxxx", # 如何获取API Key：https://help.aliyun.com/zh/model-studio/developer-reference/get-api-key
+    api_key="sk-xxxxxx", # 如何获取API Key：https://help.aliyun.com/zh/model-studio/developer-reference/get-api-key
     base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
 )
 
@@ -16,7 +16,7 @@ def get_debug_instruction(step_output: str) -> str:
     compressed_info = " ".join(step_output.split())
     
     completion = client.chat.completions.create(
-    model="qwen-turbo", 
+    model="qwen-plus-2025-01-25", 
     messages=[{
         'role': 'system', 
         'content': DEBUG_INSTRUCTION_PROMPT},
@@ -27,10 +27,11 @@ def get_debug_instruction(step_output: str) -> str:
     try:
         result = completion.choices[0].message.content
         resp = json.loads(result)
+        print("DEBUGGER_AI_RESP:",resp)
         
-        if resp.get("step_into", False):
+        if resp.get("step_into"):
             instruction = "step_into"
-        elif resp.get("step_out", False):
+        elif resp.get("step_out"):
             instruction = "step_out"
         else:
             instruction = "step_over"  
