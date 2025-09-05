@@ -1,6 +1,8 @@
 import time
 import functools
 import asyncio
+import os
+import platform
 import gc
 from datetime import datetime
 from collections import OrderedDict
@@ -154,3 +156,74 @@ async def async_write_to_file(info: str):
         with open(filename, "a+", encoding="utf-8") as file:
             file.write(info + "\n")
     await asyncio.to_thread(_write)
+    
+# 自动检测操作系统并选择合适的浏览器路径
+def get_browser_path(browser_type="chrome"):
+    """根据操作系统类型和浏览器类型获取浏览器可执行文件路径
+    
+    Args:
+        browser_type: 浏览器类型，支持"chrome"、"firefox"和"edge"，默认为"chrome"
+        
+    Returns:
+        str: 浏览器可执行文件路径，如果找不到则返回None
+    """
+    system = platform.system()
+    
+    # 定义各操作系统下常见的浏览器安装路径
+    browser_paths = {
+        "Windows": {
+            "chrome": [
+                r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+                r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"
+            ],
+            "firefox": [
+                r"C:\Program Files\Mozilla Firefox\firefox.exe",
+                r"C:\Program Files (x86)\Mozilla Firefox\firefox.exe"
+            ],
+            "edge": [
+                r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+                r"C:\Program Files\Microsoft\Edge\Application\msedge.exe"
+            ]
+        },
+        "Darwin": {  # macOS
+            "chrome": [
+                "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+                "~/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+            ],
+            "firefox": [
+                "/Applications/Firefox.app/Contents/MacOS/firefox",
+                "~/Applications/Firefox.app/Contents/MacOS/firefox"
+            ],
+            "edge": [
+                "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+                "~/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"
+            ]
+        },
+        "Linux": {
+            "chrome": [
+                "/usr/bin/google-chrome",
+                "/usr/bin/chromium-browser",
+                "/usr/bin/chromium"
+            ],
+            "firefox": [
+                "/usr/bin/firefox"
+            ],
+            "edge": [
+                "/usr/bin/microsoft-edge"
+            ]
+        }
+    }
+    
+    # 获取当前操作系统对应的浏览器路径列表
+    if system in browser_paths and browser_type in browser_paths[system]:
+        paths = browser_paths[system][browser_type]
+        
+        # 检查路径是否存在
+        for path in paths:
+            # 展开用户目录(~)
+            expanded_path = os.path.expanduser(path)
+            if os.path.exists(expanded_path):
+                return expanded_path
+    
+    # 如果找不到浏览器，返回None
+    return None
