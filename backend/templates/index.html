@@ -1,0 +1,607 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI JS Debugger - AI驱动的JavaScript逆向分析工具</title>
+
+    <!-- Styles -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/apple-design.css') }}">
+
+    <!-- Icons (Lucide Icons CDN) -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <!-- Marked.js - Load BEFORE Monaco Editor to avoid AMD conflicts -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script>
+        // Store marked globally before Monaco's AMD loader takes over
+        window.markedLib = window.marked;
+    </script>
+
+    <!-- Monaco Editor -->
+    <link rel="stylesheet" data-name="vs/editor/editor.main" href="https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs/editor/editor.main.css">
+    <script>var require = { paths: { 'vs': 'https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs' } };</script>
+    <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs/loader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs/editor/editor.main.nls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs/editor/editor.main.js"></script>
+</head>
+<body>
+    <div class="app-container">
+        <!-- Top Navbar -->
+        <nav class="navbar" id="navbar">
+            <div class="navbar-brand">
+                <i data-lucide="bug" style="width: 28px; height: 28px;"></i>
+                <span>AI JS Debugger</span>
+            </div>
+
+            <!-- Memory Monitor -->
+            <div id="memory-monitor" style="flex: 1; display: flex; align-items: center; justify-content: center; gap: 15px;">
+                <i data-lucide="cpu" style="width: 16px; height: 16px;"></i>
+                <span style="font-size: 14px; color: var(--text-secondary);">内存:</span>
+                <span id="memory-percent" style="font-weight: 600; min-width: 45px;">--</span>
+                <div style="width: 120px; height: 6px; background: var(--bg-hover); border-radius: 3px; overflow: hidden;">
+                    <div id="memory-bar" style="height: 100%; background: var(--accent-success); transition: width 0.3s, background-color 0.3s; width: 0%;"></div>
+                </div>
+                <button class="btn btn-sm" onclick="clearMemory()" title="清理内存" style="padding: 4px 12px; font-size: 12px;">
+                    <i data-lucide="trash-2" style="width: 14px; height: 14px; margin-right: 4px;"></i>
+                    清理
+                </button>
+            </div>
+
+            <div class="navbar-actions">
+                <!-- Theme Toggle -->
+                <button class="btn btn-icon" id="theme-toggle" title="切换暗色模式">
+                    <i data-lucide="moon" id="theme-icon"></i>
+                </button>
+
+                <!-- Settings -->
+                <button class="btn btn-icon" onclick="showPage('settings')" title="设置">
+                    <i data-lucide="settings"></i>
+                </button>
+            </div>
+        </nav>
+
+        <!-- Sidebar -->
+        <aside class="sidebar" id="sidebar">
+            <nav class="sidebar-nav">
+                <li class="sidebar-nav-item">
+                    <a class="sidebar-nav-link active" onclick="showPage('dashboard')" data-page="dashboard">
+                        <i data-lucide="layout-dashboard" class="sidebar-nav-icon"></i>
+                        <span>仪表板</span>
+                    </a>
+                </li>
+                <li class="sidebar-nav-item">
+                    <a class="sidebar-nav-link" onclick="showPage('config')" data-page="config">
+                        <i data-lucide="settings-2" class="sidebar-nav-icon"></i>
+                        <span>调试配置</span>
+                    </a>
+                </li>
+                <li class="sidebar-nav-item">
+                    <a class="sidebar-nav-link" onclick="showPage('prompts')" data-page="prompts">
+                        <i data-lucide="message-square" class="sidebar-nav-icon"></i>
+                        <span class="no-wrap">提示词配置</span>
+                    </a>
+                </li>
+                <li class="sidebar-nav-item">
+                    <a class="sidebar-nav-link" onclick="showPage('debug')" data-page="debug">
+                        <i data-lucide="play-circle" class="sidebar-nav-icon"></i>
+                        <span>实时调试</span>
+                    </a>
+                </li>
+                
+                <li class="sidebar-nav-item">
+                    <a class="sidebar-nav-link" onclick="showPage('reports')" data-page="reports">
+                        <i data-lucide="file-text" class="sidebar-nav-icon"></i>
+                        <span>报告中心</span>
+                    </a>
+                </li>
+                <li class="sidebar-nav-item">
+                    <a class="sidebar-nav-link" onclick="showPage('settings')" data-page="settings">
+                        <i data-lucide="sliders" class="sidebar-nav-icon"></i>
+                        <span>设置</span>
+                    </a>
+                </li>
+            </nav>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content" id="main-content">
+            <!-- Dashboard Page -->
+            <div class="page" id="page-dashboard">
+                <h1 class="mb-lg">仪表板</h1>
+
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 24px;">
+                    <!-- Status Card -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h3 class="card-title">系统状态</h3>
+                        </div>
+                        <div class="card-body">
+                            <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
+                                <i data-lucide="check-circle-2" style="color: var(--accent-success); width: 20px; height: 20px;"></i>
+                                <span>浏览器连接正常</span>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 12px;">
+                                <i data-lucide="check-circle-2" style="color: var(--accent-success); width: 20px; height: 20px;"></i>
+                                <span>AI 服务可用</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Quick Start Card -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h3 class="card-title">快速开始</h3>
+                        </div>
+                        <div class="card-body">
+                            <p class="mb-md">配置调试参数，开始JavaScript逆向分析</p>
+                            <button class="btn btn-primary" onclick="showPage('config')">
+                                <i data-lucide="arrow-right"></i>
+                                开始配置
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Recent Sessions Card -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h3 class="card-title">最近会话</h3>
+                        </div>
+                        <div class="card-body" id="recent-sessions-container">
+                            <p class="text-secondary">加载中...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Debug Config Page -->
+            <div class="page" id="page-config" style="display: none;">
+                <h1 class="mb-lg">调试配置</h1>
+
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">基本配置</h3>
+                        <p class="card-subtitle">配置调试目标和断点信息</p>
+                    </div>
+                    <div class="card-body">
+                        <form id="debug-config-form">
+                            <!-- Target URL -->
+                            <div class="form-group">
+                                <label class="form-label">目标网站 URL</label>
+                                <input type="url" class="form-input" id="target-url" placeholder="https://example.com" required>
+                            </div>
+
+                            <!-- Browser Selection -->
+                            <div class="form-group">
+                                <label class="form-label">选择浏览器</label>
+                                <select class="form-select" id="browser-type">
+                                    <option value="chrome">Google Chrome</option>
+                                    <option value="firefox">Mozilla Firefox</option>
+                                    <option value="edge">Microsoft Edge</option>
+                                </select>
+                            </div>
+
+                            <!-- Breakpoint Mode -->
+                            <div class="form-group">
+                                <label class="form-label">断点模式</label>
+                                <div style="display: flex; gap: 12px;">
+                                    <label style="flex: 1; cursor: pointer;">
+                                        <input type="radio" name="breakpoint-mode" value="js" checked style="margin-right: 8px;">
+                                        JS 文件断点
+                                    </label>
+                                    <label style="flex: 1; cursor: pointer;">
+                                        <input type="radio" name="breakpoint-mode" value="xhr" style="margin-right: 8px;">
+                                        XHR 请求断点
+                                    </label>
+                                </div>
+                            </div>
+
+                            <!-- JS Mode Config -->
+                            <div id="js-mode-config">
+                                <div class="form-group">
+                                    <label class="form-label">JS 文件路径</label>
+                                    <input type="text" class="form-input" id="js-file" placeholder="https://example.com/js/main.js">
+                                </div>
+                                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                                    <div class="form-group">
+                                        <label class="form-label">断点行号</label>
+                                        <input type="number" class="form-input" id="line-number" placeholder="0" value="0">
+                                    </div>
+                                    <div class="form-group">
+                                        <label class="form-label">断点列号</label>
+                                        <input type="number" class="form-input" id="column-number" placeholder="0" value="0">
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- XHR Mode Config -->
+                            <div id="xhr-mode-config" style="display: none;">
+                                <div class="form-group">
+                                    <label class="form-label">XHR 请求 URL</label>
+                                    <input type="text" class="form-input" id="xhr-url" placeholder="留空监听所有请求">
+                                </div>
+                            </div>
+
+                            <!-- AI Provider Selection -->
+                            <div class="form-group">
+                                <label class="form-label">AI 提供商</label>
+                                <select class="form-select" id="ai-provider">
+                                    <option value="qwen">通义千问</option>
+                                    <option value="openai">OpenAI GPT</option>
+                                    <option value="deepseek">Deepseek</option>
+                                    <option value="ernie">文心一言</option>
+                                    <option value="spark">讯飞星火</option>
+                                </select>
+                            </div>
+
+                            <div class="card-footer">
+                                <button type="button" class="btn btn-secondary" onclick="showPage('dashboard')">取消</button>
+                                <button type="submit" class="btn btn-primary">
+                                    <i data-lucide="play"></i>
+                                    开始调试
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Debug Page -->
+            <div class="page" id="page-debug" style="display: none;">
+                <div class="debug-header">
+                    <div>
+                        <h1 class="no-wrap" style="margin: 0;">实时调试</h1>
+                        <p style="margin: 4px 0 0; font-size: 0.85rem; color: var(--text-secondary);">集中管理调试会话与实时日志</p>
+                    </div>
+                    <div style="display: flex; gap: 8px;">
+                        <button class="btn btn-primary" id="debug-stop-btn" onclick="debugStop()" disabled style="background: var(--accent-danger);">
+                            <i data-lucide="square"></i>
+                            停止
+                        </button>
+                    </div>
+                </div>
+
+                <div class="session-manager-card">
+                    <div class="session-manager-row">
+                        <div class="session-manager-label">
+                            <label class="text-secondary no-wrap" style="font-size: 0.85rem;">会话管理</label>
+                        </div>
+                        <div class="session-compact-wrapper">
+                            <div id="session-chip-compact" class="session-chip-list session-chip-compact">
+                                <div class="session-chip-empty">暂无会话</div>
+                            </div>
+                            <button class="btn btn-icon btn-ghost session-more-btn" type="button" onclick="toggleSessionDialog()" title="管理会话">
+                                <i data-lucide="more-horizontal"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="session-dialog" class="session-dialog" aria-hidden="true">
+                    <div class="session-dialog-backdrop" onclick="closeSessionDialog()"></div>
+                    <div class="session-dialog-panel">
+                        <div class="session-dialog-header">
+                            <div>
+                                <h4>全部会话</h4>
+                                <p>刷新、选择或删除调试会话</p>
+                            </div>
+                            <button class="btn btn-icon btn-ghost" type="button" onclick="closeSessionDialog()" title="关闭">
+                                <i data-lucide="x"></i>
+                            </button>
+                        </div>
+                        <div class="session-dialog-actions">
+                            <button class="btn btn-secondary" type="button" onclick="refreshSessionManager()">
+                                <i data-lucide="refresh-cw" style="width: 16px; height: 16px;"></i>
+                                刷新
+                            </button>
+                            <button class="btn btn-secondary" type="button" onclick="selectAllSessions()">
+                                <i data-lucide="check-square" style="width: 16px; height: 16px;"></i>
+                                全选
+                            </button>
+                            <button class="btn btn-primary" type="button" id="session-dialog-delete-btn" onclick="deleteSelectedSessions()" disabled>
+                                <i data-lucide="trash-2" style="width: 16px; height: 16px;"></i>
+                                删除选中
+                            </button>
+                        </div>
+                        <div id="session-dialog-list" class="session-dialog-list">
+                            <div class="session-dialog-empty">暂无会话</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 三栏调试布局 -->
+                <div style="display: grid; grid-template-columns: 250px 1fr 300px; gap: 16px; height: calc(100vh - 200px);">
+                    <!-- 左侧：调用栈 -->
+                    <div class="card" style="display: flex; flex-direction: column; overflow: hidden;">
+                        <div class="card-header" style="flex-shrink: 0;">
+                            <h3 class="card-title" style="font-size: 0.875rem; margin: 0;">调用栈</h3>
+                        </div>
+                        <div class="card-body" style="flex: 1; overflow-y: auto; padding: 0;">
+                            <div id="call-stack-list"></div>
+                        </div>
+                    </div>
+
+                    <!-- 中间：代码上下文 + 控制台日志 -->
+                    <div class="card" style="display: flex; flex-direction: column; overflow: hidden;">
+                        <div class="card-header" style="flex-shrink: 0; display: flex; justify-content: space-between; align-items: center; gap: 12px;">
+                            <div class="step-selector-wrapper">
+                                <h3 class="card-title no-wrap" style="font-size: 0.875rem; margin: 0;">代码上下文</h3>
+                                <div class="step-selector-group">
+                                    <label class="text-secondary no-wrap" style="font-size: 0.75rem;">步骤</label>
+                                    <select id="debug-step-selector" class="form-select" style="height: 28px; padding: 2px 6px; min-width: 200px; font-size: 0.8rem;"></select>
+                                    <div class="step-nav-buttons">
+                                        <button class="btn btn-ghost btn-sm" type="button" id="debug-step-prev" onclick="jumpStep(-1)" disabled>上一步</button>
+                                        <button class="btn btn-ghost btn-sm" type="button" id="debug-step-next" onclick="jumpStep(1)" disabled>下一步</button>
+                                    </div>
+                                </div>
+                            </div>
+                            <span id="current-file-name" style="font-size: 0.75rem; color: var(--text-tertiary);"></span>
+                        </div>
+                        <div class="card-body" style="flex: 1; overflow: hidden; padding: 8px; display: flex; flex-direction: column;">
+                            <div id="code-context" class="code-view" style="flex: 6; min-height: 100px; font-family: var(--font-mono); font-size: 0.8125rem; color: var(--text-secondary); padding: 8px 12px; white-space: pre; overflow: auto; border-radius: 8px 8px 0 0; background: var(--bg-secondary);"></div>
+                            <div id="resize-handle" style="height: 6px; flex-shrink: 0; background: var(--divider-color); cursor: ns-resize; position: relative; z-index: 10; display: flex; align-items: center; justify-content: center;">
+                                <div style="width: 40px; height: 3px; background: var(--text-tertiary); border-radius: 2px; opacity: 0.5;"></div>
+                            </div>
+                            <div id="debug-console" style="flex: 4; min-height: 100px; background: #111; color: #e6e6e6; font-family: var(--font-mono); font-size: 0.8125rem; padding: 8px 12px; border: 1px solid var(--divider-color); overflow: auto; border-radius: 0 0 8px 8px;"><pre id="debug-log-content" style="margin:0; white-space: pre-wrap;"></pre></div>
+                        </div>
+                    </div>
+
+                    <!-- 右侧：变量和作用域 -->
+                    <div class="card" style="display: flex; flex-direction: column; overflow: hidden;">
+                        <div class="card-header" style="flex-shrink: 0;">
+                            <h3 class="card-title" style="font-size: 0.875rem; margin: 0;">变量</h3>
+                        </div>
+                        <div class="card-body" style="flex: 1; overflow-y: auto; padding: 0;">
+                            <div id="variables-list"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 已移除底部调试日志卡片，日志已内置到中间卡片（console样式） -->
+
+                <!-- 调试状态指示器 -->
+                <div id="debug-status" style="position: fixed; bottom: 24px; right: 24px; background: var(--bg-secondary); padding: 12px 20px; border-radius: 20px; box-shadow: var(--shadow-lg); display: none;">
+                    <span id="debug-status-text" style="font-size: 0.875rem; color: var(--text-secondary);">
+                        <i id="debug-status-icon" data-lucide="activity" style="width: 16px; height: 16px; display: inline-block; vertical-align: middle; color: var(--accent-success);"></i>
+                        <span id="debug-status-label">未开始调试</span>
+                    </span>
+                </div>
+            </div>
+
+            <!-- Prompts Config Page -->
+            <div class="page" id="page-prompts" style="display: none;">
+                <h1 class="mb-lg no-wrap">提示词配置</h1>
+
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title no-wrap">断点调试提示词</h3>
+                        <p class="card-subtitle">用于实时调试循环的AI指令生成</p>
+                    </div>
+                    <div class="card-body">
+                        <textarea id="prompt-debug" class="form-input" style="width:100%; height:160px; font-family: var(--font-mono);"></textarea>
+                    </div>
+                </div>
+
+                <div class="card mt-lg">
+                    <div class="card-header">
+                        <h3 class="card-title no-wrap">AI分析提示词</h3>
+                        <p class="card-subtitle">用于生成报告的分析提示词</p>
+                    </div>
+                    <div class="card-body">
+                        <textarea id="prompt-analysis" class="form-input" style="width:100%; height:160px; font-family: var(--font-mono);"></textarea>
+                    </div>
+                    <div class="card-footer">
+                        <button class="btn btn-secondary" onclick="loadPrompts()"><i data-lucide="refresh-cw"></i> 重新加载</button>
+                        <button class="btn btn-primary" onclick="savePrompts()"><i data-lucide="save"></i> 保存提示词</button>
+                    </div>
+                </div>
+            </div>
+
+            
+
+            <!-- 报告中心页面 - 替换原有的 page-reports 内容 -->
+<div class="page" id="page-reports" style="display: none;">
+    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px;">
+        <h1 style="margin: 0;">报告中心</h1>
+        <div style="display: flex; gap: 12px; align-items: center;">
+            <div style="position: relative;">
+                <input type="text" class="form-input" id="report-search-input" placeholder="搜索报告..." style="width: 300px; padding-right: 40px;" onkeypress="if(event.key==='Enter')searchReports()">
+                <button class="btn btn-icon" onclick="searchReports()" style="position: absolute; right: 4px; top: 50%; transform: translateY(-50%); width: 32px; height: 32px; background: transparent;">
+                    <i data-lucide="search"></i>
+                </button>
+            </div>
+            <button class="btn btn-primary" onclick="loadReports(0)">
+                <i data-lucide="refresh-cw"></i>
+                刷新
+            </button>
+        </div>
+    </div>
+
+    <div id="reports-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 24px;">
+        <!-- 报告卡片将在这里动态生成 -->
+        <div style="grid-column: 1 / -1; text-align: center; padding: 48px;">
+            <div class="pulse" style="width: 64px; height: 64px; margin: 0 auto 16px; border-radius: 50%; background: var(--bg-hover);"></div>
+            <p class="text-secondary">加载中...</p>
+        </div>
+    </div>
+
+    <div id="reports-pagination"></div>
+</div>
+
+
+            </div>
+
+            <!-- Settings Page -->
+            <div class="page" id="page-settings" style="display: none;">
+                <h1 class="mb-lg">设置</h1>
+
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">AI 提供商配置</h3>
+                        <p class="card-subtitle">管理所有 AI 提供商的 API 密钥和模型配置</p>
+                    </div>
+                    <div class="card-body">
+                        <div id="ai-providers-list">
+                            <!-- AI 提供商列表将在这里动态生成 -->
+                            <div style="text-align: center; padding: 24px;">
+                                <div class="pulse" style="width: 48px; height: 48px; margin: 0 auto 12px; border-radius: 50%; background: var(--bg-hover);"></div>
+                                <p class="text-secondary">加载中...</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card mt-lg">
+                    <div class="card-header">
+                        <h3 class="card-title">AI 网络代理</h3>
+                        <p class="card-subtitle">为不同的 AI 提供商指定独立的网络出口（支持 HTTP/HTTPS/SOCKS5）</p>
+                    </div>
+                    <div class="card-body">
+                        <div style="display:flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                            <div>
+                                <h4 style="margin:0; font-size: 1rem;">代理列表</h4>
+                                <p style="margin:4px 0 0; font-size: 0.85rem; color: var(--text-secondary);">可以为不同的 AI 供应商选择不同的代理</p>
+                            </div>
+                            <button class="btn btn-primary" onclick="showProxyModal()" style="padding: 8px 16px;">
+                                <i data-lucide="plus"></i>
+                                添加代理
+                            </button>
+                        </div>
+                        <div id="ai-proxies-list">
+                            <div style="text-align: center; padding: 24px;">
+                                <div class="pulse" style="width: 48px; height: 48px; margin: 0 auto 12px; border-radius: 50%; background: var(--bg-hover);"></div>
+                                <p class="text-secondary">加载中...</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card mt-lg">
+                    <div class="card-header">
+                        <h3 class="card-title">JS Hook 配置</h3>
+                        <p class="card-subtitle">管理 hooks 目录下的注入脚本，灵活开启或关闭</p>
+                    </div>
+                    <div class="card-body">
+                        <div class="form-group">
+                            <label class="form-label">
+                                <input type="checkbox" id="hooks-enabled" style="margin-right: 8px;">
+                                启用 Hook 注入
+                            </label>
+                            <p class="text-secondary" style="margin: 4px 0 0; font-size: 0.85rem;">关闭后不会向页面注入任何 Hook</p>
+                        </div>
+                        <div id="hook-files-list" class="hook-files-list" style="margin-top: 12px;">
+                            <p class="text-secondary">加载中...</p>
+                        </div>
+                        <button class="btn btn-primary" onclick="saveHookConfig()" style="margin-top: 16px;">
+                            <i data-lucide="save"></i>
+                            保存 Hook 配置
+                        </button>
+                    </div>
+                </div>
+
+                <div class="card mt-lg">
+                    <div class="card-header">
+                        <h3 class="card-title">浏览器配置</h3>
+                        <p class="card-subtitle">配置浏览器路径（可选，通常自动检测）</p>
+                    </div>
+                    <div class="card-body">
+                        <div class="form-group">
+                            <label class="form-label">Chrome 路径</label>
+                            <input type="text" class="form-input" id="chrome-path" placeholder="留空自动检测">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Firefox 路径</label>
+                            <input type="text" class="form-input" id="firefox-path" placeholder="留空自动检测">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Edge 路径</label>
+                            <input type="text" class="form-input" id="edge-path" placeholder="留空自动检测">
+                        </div>
+                        <button class="btn btn-primary" onclick="saveBrowserConfig()">
+                            <i data-lucide="save"></i>
+                            保存浏览器配置
+                        </button>
+                    </div>
+                </div>
+
+                <div class="card mt-lg">
+                    <div class="card-header">
+                        <h3 class="card-title">调试设置</h3>
+                        <p class="card-subtitle">调整调试行为和性能参数</p>
+                    </div>
+                    <div class="card-body">
+                        <div class="form-group">
+                            <label class="form-label">
+                                <input type="checkbox" id="auto-save" style="margin-right: 8px;">
+                                自动保存调试数据
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">保存间隔（秒）</label>
+                            <input type="number" class="form-input" id="save-interval" value="300" min="60" max="3600">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">最大调试时长（秒）</label>
+                            <input type="number" class="form-input" id="max-duration" value="600" min="60" max="3600">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">上下文代码数量（每侧字符数，默认150）</label>
+                            <input type="number" class="form-input" id="context-chars" value="150" min="20" max="2000">
+                        </div>
+                        <div class="form-group" style="display:grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                            <div>
+                                <label class="form-label">作用域变量层级（默认2）</label>
+                                <input type="number" class="form-input" id="scope-max-depth" value="2" min="1" max="6">
+                            </div>
+                            <div>
+                                <label class="form-label">作用域变量总数量（默认15）</label>
+                                <input type="number" class="form-input" id="scope-max-total" value="15" min="5" max="200">
+                            </div>
+                        </div>
+                        <button class="btn btn-primary" onclick="saveDebugConfig()">
+                            <i data-lucide="save"></i>
+                            保存调试设置
+                        </button>
+                    </div>
+                </div>
+</div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Scripts -->
+    <script>
+        // 临时禁用AMD加载器，强制Socket.IO使用全局模式
+        // Monaco Editor的RequireJS会导致Socket.IO不设置window.io
+        console.log('🔧 准备加载Socket.IO，临时禁用AMD...');
+        var __define_backup = window.define;
+        var __require_backup = window.require;
+        window.define = undefined;
+        window.require = undefined;
+    </script>
+    <script src="{{ url_for('static', filename='js/socket.io.js') }}"></script>
+    <script>
+        // 恢复AMD加载器
+        window.define = __define_backup;
+        window.require = __require_backup;
+        console.log('🔧 已恢复AMD加载器');
+
+        // 立即检查socket.io是否加载成功
+        if (typeof io !== 'undefined') {
+            console.log('✅ Socket.IO 已成功加载！版本:', io.version || 'unknown');
+            console.log('✅ io对象:', io);
+        } else {
+            console.error('❌ Socket.IO 加载失败！请检查文件是否存在');
+            console.error('当前window对象的属性:', Object.keys(window).filter(k => k.includes('io') || k.includes('socket')));
+        }
+    </script>
+    <script src="{{ url_for('static', filename='js/app.js') }}?v=20251113-3"></script>
+    <script src="{{ url_for('static', filename='js/reports.js') }}?v=20251113"></script>
+    <script src="{{ url_for('static', filename='js/ai-config.js') }}?v=20251113"></script>
+    <script src="{{ url_for('static', filename='js/prompts.js') }}?v=20251113"></script>
+    <script src="{{ url_for('static', filename='js/debug.js') }}?v=20251113"></script>
+    <script src="{{ url_for('static', filename='js/memory-monitor.js') }}?v=20251111"></script>
+
+    <!-- Lucide icons are initialized in app.js DOMContentLoaded event -->
+</body>
+</html>
