@@ -9,29 +9,26 @@
 - 支持固定js文件断点、XHR请求断点
 - XHR回溯，XHR模式下自动回溯顶层调用堆栈并自动断点
 - 根据调用堆栈、js片段、作用域等断点调试信息自动调试
+- 自定义hook获取AES、RSA等加密方式
 - 自动分析加解密算法、密钥、生成密钥方式等
 - 生成分析报告以及mitmproxy脚本
 
 ## 环境要求
 
-- Python 3.8+
+- Python 3.11+
 - 支持的浏览器（至少安装一种）：
   - Google Chrome浏览器
   - Mozilla Firefox浏览器
   - Microsoft Edge浏览器
-- 大模型API密钥（支持通义千问、GPT、Deepseek、文心ERNIE、讯飞星火）
+- 大模型API密钥（兼容OpenAI的API请求格式，如Qwen、deepseek、Chatgpt、Claude等，可自定义添加）
 
-## 视频演示
-
-[![](https://i.postimg.cc/0ycFpTyJ/i-Shot-2025-03-18-11-41-01.png)](https://player.bilibili.com/player.html?isOutside=true&aid=114181269363837&bvid=BV1kPXGYVEkj&cid=28924709737&p=1)
-
-## 安装
+## 快速开始
 
 1. 克隆本仓库：
 
 ```bash
-git clone https://github.com/yourusername/js-debugger-ai.git
-cd js-debugger-ai
+git clone https://github.com/Valerian7/AI_JS_DEBUGGER.git
+cd AI_JS_DEBUGGER
 ```
 
 2. 安装依赖：
@@ -40,120 +37,64 @@ cd js-debugger-ai
 pip install -r requirements.txt
 ```
 
-3. 浏览器配置：
+3. 启动flask服务：
 
-程序支持Chrome、Firefox和Edge浏览器。运行时会提示选择浏览器类型，并自动查找浏览器的默认安装路径。
-
-如需手动指定浏览器路径，可在`main.py`中取消注释相应的路径配置：
+启动服务，浏览器访问http://localhost:5001
 
 ```Python
-# Chrome路径
-#executable_path = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'  # macOS路径
-#executable_path = r'C:\Program Files\Google\Chrome\Application\chrome.exe'  # Windows路径
-
-# Firefox路径
-#executable_path = '/Applications/Firefox.app/Contents/MacOS/firefox'  # macOS路径
-#executable_path = r'C:\Program Files\Mozilla Firefox\firefox.exe'  # Windows路径
-
-# Edge路径
-#executable_path = '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge'  # macOS路径
-#executable_path = r'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe'  # Windows路径
+python3 run_flask.py
 ```
 
-4. 配置API密钥：
+## 部分功能截图
+### 调试配置
+<img width="2559" height="1418" alt="image" src="https://github.com/user-attachments/assets/64c7b3c1-6b2b-4ff8-87c2-21e99df0964c" />
 
-根据您选择的大模型，在相应的API文件中配置密钥：
+### 提示词配置
+<img width="2559" height="1418" alt="image" src="https://github.com/user-attachments/assets/35fb2cdf-f12b-4fa8-b851-dd64b6777380" />
 
-- 通义千问（默认）：在`ai_debugger/api/qwen_api.py`中配置
-```python
-client = OpenAI(
-    api_key="your-api-key-here",
-    base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
-)
-```
+### 实时查看调试信息
+<img width="2559" height="1418" alt="image" src="https://github.com/user-attachments/assets/94df28e0-e242-4bb1-b971-45a33fdb4285" />
 
-- GPT：在`ai_debugger/api/gpt_api.py`中配置
-```python
-# 默认使用官方API
-use_third_party_api = False  # 设置为True启用第三方API
-third_party_base_url = "https://your-third-party-api.com/v1"  # 第三方API地址
+### 分析报告管理
+<img width="2559" height="1418" alt="image" src="https://github.com/user-attachments/assets/f2a3b0ff-afa2-4fd3-a823-a697c1b6de68" />
 
-# 配置客户端
-if use_third_party_api and third_party_base_url:
-    client = OpenAI(
-        api_key="your-api-key-here",
-        base_url=third_party_base_url,
-    )
-else:
-    client = OpenAI(
-        api_key="your-api-key-here",
-        # 使用官方API地址，无需设置base_url
-    )
-```
+### 设置中心
+<img width="2559" height="1418" alt="image" src="https://github.com/user-attachments/assets/762d4be6-29ab-40db-b421-9f8d1c3319e9" />
 
-- Deepseek：在`ai_debugger/api/deepseek_api.py`中配置
-```python
-client = OpenAI(
-    api_key="your-api-key-here",
-    base_url="https://api.deepseek.com/v1",
-)
-```
 
-- 文心ERNIE：在`ai_debugger/api/ernie_api.py`中配置
-```python
-client = OpenAI(
-    api_key="your-api-key-here",
-    base_url="https://aip.baidubce.com/rpc/2.0/ai_custom/v1/wenxinworkshop/chat/completions",
-)
-```
-
-- 讯飞星火：在`ai_debugger/api/spark_api.py`中配置
-```python
-client = OpenAI(
-    api_key="your-api-key-here",
-    base_url="https://api.xfyun.cn/v2.1/chat",
-)
-```
-
-## 使用方法
-
-1. 运行主程序：
-
-```bash
-python main.py
-```
-
-2. 选择断点模式和大模型API：
-   - 断点模式：
-     - `js`: 使用JavaScript文件路径和行号设置断点
-     - `xhr`: 设置XHR请求断点
-   - 大模型API：
-     - `qwen`: 使用通义千问API（默认）
-     - `gpt`: 使用OpenAI GPT API
-     - `deepseek`: 使用Deepseek API
-     - `ernie`: 使用百度文心ERNIE API
-     - `spark`: 使用讯飞星火API
-
-3. 按照提示输入断点信息
-
-### JS断点示例
-
-FAQ：若JS被压缩成一行，则断点行数为0行
-```
-请输入待分析站点链接:https://example.com/login
-请选择断点模式(js/xhr): js
-请输入JS文件路径: https://example.com/js/main.js
-请输入断点行数: 120
-请输入断点列数: 0
-```
-
-### XHR断点示例
+## 项目结构概览
 
 ```
-请输入待分析站点链接:https://example.com/login
-请选择断点模式(js/xhr): xhr
-请输入XHR请求URL(不填写则监听所有请求): /api/login
+AI_JS_DEBUGGER_0.4.0
+├── backend
+│   ├── app.py              # Flask + Socket.IO 入口
+│   ├── routes/             # 调试、配置、系统监控 API
+│   ├── services/           # AI/代理管理与系统任务
+│   ├── static/             # Web UI JS/CSS/图标
+│   └── templates/          # 仪表盘页面
+├── ai_debugger
+│   ├── ai_debugger.py      # 调试循环调度器
+│   └── modules/            # 工具模块（分析、日志等）
+├── modules
+│   ├── cdp/                # 浏览器会话、Hook 注入
+│   ├── debug/              # 断点、报告、日志处理
+│   └── hooks/              # Hook 管理器封装
+├── hooks
+│   └── Hook_Combined.js    # 发布版示例脚本
+├── run_flask.py            # Web UI 启动脚本
+├── main.py                 # 旧版 CLI 入口（保留）
+└── config.yaml             # 模型/代理/Hook 配置
 ```
+
+### FAQ
+
+- 问：若JS被压缩成一行怎么设置断点行数和列数
+  - 答：取消浏览器js美化，查看断点行数和列数，行数一般为0
+- 问：不知道在哪断点怎么办
+  - 答：可通过xhr方式断点，可自动回溯到最顶层堆栈；可查看浏览器开发者工具-网络-启动器查看请求调用堆栈
+- 问：触发xhr断点之后怎么还要再重新触发一次
+  - 答：xhr模式需要二次触发断点，第一次为xhr断点，第二次为回溯到顶层堆栈重新下的断点
+
 
 ## 贡献
 
