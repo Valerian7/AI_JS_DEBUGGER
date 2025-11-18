@@ -80,9 +80,8 @@ AI_JS_DEBUGGER_0.4.0
 │   ├── debug/              # 断点、报告、日志处理
 │   └── hooks/              # Hook 管理器封装
 ├── hooks
-│   └── Hook_Combined.js    # 发布版示例脚本
+│   └── Hook_Combined.js    # HOOK 脚本
 ├── run_flask.py            # Web UI 启动脚本
-├── main.py                 # 旧版 CLI 入口（保留）
 └── config.yaml             # 模型/代理/Hook 配置
 ```
 
