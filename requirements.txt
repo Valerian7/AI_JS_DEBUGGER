@@ -1,5 +1,14 @@
 pyppeteer>=1.0.2
 openai>=1.1.0
 jsbeautifier>=1.14.7
-asyncio>=3.4.3
-aiohttp>=3.8.4 
+aiohttp>=3.8.4
+psutil>=5.9.0
+Flask>=3.0.0
+Flask-SocketIO>=5.3.0
+Flask-CORS>=4.0.0
+python-socketio>=5.10.0
+eventlet>=0.33.0
+litellm>=1.0.0
+httpx[socks]>=0.25.0
+PyYAML>=6.0.0
+python-dotenv>=1.0.0 

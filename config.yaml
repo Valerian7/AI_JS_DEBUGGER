@@ -1,0 +1,149 @@
+ai:
+  default_provider: qwen
+  providers:
+    claude:
+      analysis_model: claude-haiku-4-5
+      api_key: ''
+      available_models:
+      - claude-sonnet-4-5
+      - claude-opus-4-1
+      base_url: https://api.anthropic.com/v1
+      display_name: Claude
+      logo: /static/assets/provider-logos/claude.svg
+      model: claude-haiku-4-5
+      proxy_id: null
+    deepseek:
+      analysis_model: deepseek-chat
+      api_key: ''
+      available_models:
+      - deepseek-chat
+      - deepseek-reasoner
+      base_url: https://api.deepseek.com/v1
+      display_name: DeepSeek
+      logo: /static/assets/provider-logos/deepseek.svg
+      model: deepseek-chat
+      proxy_id: null
+    glm:
+      analysis_model: GLM-4.5-X
+      api_key: ''
+      available_models:
+      - GLM-4.6
+      - GLM-4.5
+      - GLM-4.5-X
+      base_url: https://open.bigmodel.cn/api/paas/v4/
+      display_name: 智谱 GLM
+      logo: /static/assets/provider-logos/glm.svg
+      model: GLM-4.5-X
+      proxy_id: null
+    kat:
+      analysis_model: KAT-Coder-Exp-72B-1010
+      api_key: ''
+      available_models:
+      - KAT-Coder-Pro-V1
+      - KAT-Coder-Air-V1
+      - KAT-Coder-Exp-72B-1010
+      base_url: https://wanqing.streamlakeapi.com/api/gateway/v1/endpoints/chat/completions
+      display_name: 快手 KAT
+      logo: /static/assets/provider-logos/kat.svg
+      model: KAT-Coder-Exp-72B-1010
+      proxy_id: null
+      vanchin_endpoint_id: ''
+    kimi:
+      analysis_model: kimi-k2-thinking-turbo
+      api_key: ''
+      available_models:
+      - moonshot-v1-8k
+      - moonshot-v1-32k
+      - kimi-k2-0711-preview
+      - kimi-k2-thinking-turbo
+      - kimi-k2-thinking
+      - kimi-k2-0905-preview
+      - kimi-k2-turbo-preview
+      base_url: https://api.moonshot.cn/v1
+      display_name: Kimi (Moonshot)
+      logo: /static/assets/provider-logos/kimi.svg
+      model: kimi-k2-turbo-preview
+      proxy_id: null
+    minimax:
+      analysis_model: MiniMax-M2
+      api_key: ''
+      available_models:
+      - MiniMax-M2
+      base_url: https://api.minimaxi.com/v1
+      display_name: MiniMax
+      logo: /static/assets/provider-logos/minimax.svg
+      model: MiniMax-M2
+      proxy_id: null
+    openai:
+      analysis_model: gpt-5-mini
+      api_key: ''
+      available_models:
+      - gpt-4o-mini
+      - gpt-4o
+      - gpt-4.1-mini
+      - gpt-5.1
+      - gpt-5
+      - gpt-5-mini
+      - gpt-4
+      base_url: https://api.openai.com/v1
+      display_name: OPENAI
+      logo: /static/assets/provider-logos/openai.svg
+      model: gpt-5-mini
+      proxy_id: null
+    qwen:
+      analysis_model: qwen-long
+      api_key: ''
+      available_models:
+      - qwen-plus-2025-01-25
+      - qwen-turbo
+      - qwen-long
+      base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+      display_name: 通义千问
+      logo: /static/assets/provider-logos/qwen.svg
+      model: qwen-turbo
+      proxy_id: null
+  proxies:
+    default: null
+    items: {}
+browser:
+  chrome_path: null
+  default: chrome
+  edge_path: null
+  firefox_path: null
+debug:
+  auto_save: true
+  context_chars: 150
+  log_level: INFO
+  max_duration: 600
+  save_interval: 300
+  scope_max_depth: 4
+  scope_max_total_props: 15
+hooks:
+  enabled: true
+  enabled_files:
+  - Hook_Combined.js
+prompts:
+  analysis: "任务：你是一个JavaScript逆向分析专家，负责分析调试数据，请根据调试过程中收集的信息，分析出以下内容，输出md格式的JavaScript\
+    \ 加解密分析报告\n1. 加解密方法识别：\n   - 识别所有加密/解密函数及其调用链\n   - 分析加密算法类型（对称/非对称/哈希等）\n   -\
+    \ 识别自定义加密算法和混淆技术\n\n2. 密钥提取：\n   - 提取所有加密密钥、IV、salt等参数\n   - 分析密钥生成/派生逻辑\n   -\
+    \ 识别密钥存储位置（本地存储/Cookie/内存）\n\n3. 关键代码分析：\n   - 提取核心加解密逻辑，简化并注释\n   - 分析混淆代码的实际功能\n\
+    \   - 识别动态执行代码（eval/Function）的实际内容\n\n4. 编写mitmproxy脚本：\n   - 实现请求/响应数据的解密和加密\n\
+    \   - 处理特殊头部和参数\n   - 确保脚本简洁高效\n\n请保持分析简洁，不需要加固建议，专注于核心加解密逻辑和mitmproxy脚本实现。"
+  debug: "任务：你是一个JavaScript逆向分析专家，负责根据当前断点的调试信息分析加密相关代码并决定最优调试策略。\n\n可选操作：\n- step_into:\
+    \ 单步进入（进入函数内部）\n- step_out: 单步跳出（跳出当前函数）\n- step_over: 单步跳过（执行当前行，停在下一行）\n\n分析重点：\n\
+    1. 加密函数识别：\n   - 函数名包含encrypt/decrypt/AES/RSA/DES/MD5/SHA/Hash/Crypto/签名/code等关键词\n\
+    \   - JavaScript特有加密：btoa/atob(Base64)、TextEncoder/TextDecoder、crypto.subtle等Web\
+    \ API\n   - 位运算加密：XOR(^)、位移(<<,>>)、按位与(&)、按位或(|)等操作\n2. 可疑函数调用：\n   - 网络请求相关：fetch/XMLHttpRequest/axios/$.ajax/sendData*/getToken*/getSign*/request*\n\
+    \   - 数据处理相关：JSON.parse/stringify、URLSearchParams、FormData操作\n3. 加密库识别：\n   -\
+    \ 主流库：CryptoJS/WebCrypto/forge/jsencrypt/crypto-js/sjcl/noble-*\n   - 自定义库：检测_加密函数命名模式、特定算法实现特征\n\
+    4. 数据转换操作：\n   - 编码转换：Base64/HEX/UTF-8/encodeURIComponent/escape\n   - 字符串操作：toString/fromCharCode/charCodeAt/padStart/padEnd/split/join\n\
+    \   - 数组操作：TypedArray(Uint8Array等)、Array.from、map/reduce用于字节处理\n5. 混淆代码识别：\n \
+    \  - 动态执行：eval/Function构造函数/setTimeout+字符串/new Function()\n   - 字符串拼接：大量的字符串拼接、字符编码转换、数组join操作\n\
+    \   - 控制流扁平化：大型switch-case结构、状态机模式、大量条件判断\n   - 变量混淆：单字符变量、数字变量名、无意义变量名\n6. 可疑参数：IV/key/salt/mode/data/padding/secret/token/sign/signature等加密参数\n\
+    \n精确决策规则：\n   -step_over：首次遇到加密函数调用或eval/Function动态代码\n   -step_over：在加密函数内部的非核心步骤或复杂混淆代码\n\
+    \   -step_out：嵌套超过3层或陷入重复循环时\n\n输出格式（必须是有效的JSON）：\n{\n  \"step_into\": false,\n\
+    \  \"step_out\": false,\n  \"step_over\": true,\n  \"reason\": \"简短说明原因\"\n}\n\
+    \n注意：三个操作中只能有一个为 true"
+ui:
+  language: zh
+  theme: auto
