@@ -71,6 +71,55 @@ class LRUCache(OrderedDict):
 
 script_source_cache = LRUCache(capacity=500)
 
+# 性能监控
+class PerformanceMonitor:
+    """性能监控类,用于跟踪关键操作的耗时"""
+
+    def __init__(self):
+        self.metrics = {}
+        self.start_times = {}
+
+    def start(self, operation: str):
+        """开始计时"""
+        import time
+        self.start_times[operation] = time.perf_counter()
+
+    def end(self, operation: str) -> float:
+        """结束计时并返回耗时(秒)"""
+        import time
+        if operation not in self.start_times:
+            return 0.0
+        elapsed = time.perf_counter() - self.start_times[operation]
+        if operation not in self.metrics:
+            self.metrics[operation] = []
+        self.metrics[operation].append(elapsed)
+        del self.start_times[operation]
+        return elapsed
+
+    def get_stats(self, operation: str) -> dict:
+        """获取操作的统计信息"""
+        if operation not in self.metrics or not self.metrics[operation]:
+            return {}
+        times = self.metrics[operation]
+        return {
+            'count': len(times),
+            'total': sum(times),
+            'avg': sum(times) / len(times),
+            'min': min(times),
+            'max': max(times)
+        }
+
+    def get_all_stats(self) -> dict:
+        """获取所有操作的统计信息"""
+        return {op: self.get_stats(op) for op in self.metrics.keys()}
+
+    def clear(self):
+        """清空所有统计数据"""
+        self.metrics.clear()
+        self.start_times.clear()
+
+performance_monitor = PerformanceMonitor()
+
 _debug_session_filename = None
 
 def get_script_source_cache_key(script_id: str) -> str:
@@ -153,24 +202,20 @@ async def async_write_to_file(info: str):
     
 def get_browser_path(browser_type="chrome"):
     """根据操作系统类型和浏览器类型获取浏览器可执行文件路径
-    
+
     Args:
-        browser_type: 浏览器类型，支持"chrome"、"firefox"和"edge"，默认为"chrome"
-        
+        browser_type: 浏览器类型，支持"chrome"和"edge"，默认为"chrome"
+
     Returns:
         str: 浏览器可执行文件路径，如果找不到则返回None
     """
     system = platform.system()
-    
+
     browser_paths = {
         "Windows": {
             "chrome": [
                 r"C:\Program Files\Google\Chrome\Application\chrome.exe",
                 r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"
-            ],
-            "firefox": [
-                r"C:\Program Files\Mozilla Firefox\firefox.exe",
-                r"C:\Program Files (x86)\Mozilla Firefox\firefox.exe"
             ],
             "edge": [
                 r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
@@ -182,10 +227,6 @@ def get_browser_path(browser_type="chrome"):
                 "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
                 "~/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
             ],
-            "firefox": [
-                "/Applications/Firefox.app/Contents/MacOS/firefox",
-                "~/Applications/Firefox.app/Contents/MacOS/firefox"
-            ],
             "edge": [
                 "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
                 "~/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"
@@ -196,9 +237,6 @@ def get_browser_path(browser_type="chrome"):
                 "/usr/bin/google-chrome",
                 "/usr/bin/chromium-browser",
                 "/usr/bin/chromium"
-            ],
-            "firefox": [
-                "/usr/bin/firefox"
             ],
             "edge": [
                 "/usr/bin/microsoft-edge"
