@@ -105,7 +105,22 @@ def start_session(session_id):
         import subprocess
         import threading
 
-        executable_path = session.browser_executable_path
+        try:
+            executable_path = session.browser_executable_path
+        except FileNotFoundError as e:
+            error_msg = str(e)
+            logger.error(error_msg)
+            session.update_status(SessionStatus.ERROR, error_msg)
+            return jsonify({
+                'success': False,
+                'error': error_msg
+            }), 400
+
+        if not executable_path:
+            error_msg = f'未能解析 {session.browser_type.value} 可执行文件路径'
+            logger.error(error_msg)
+            session.update_status(SessionStatus.ERROR, error_msg)
+            return jsonify({'success': False, 'error': error_msg}), 400
         target_url = session.target_url
         launch_url = target_url or 'about:blank'
 
@@ -116,6 +131,21 @@ def start_session(session_id):
         import random
         debug_port = random.randint(9223, 9999)
         session.debug_port = debug_port
+
+        session.devtools_ws_endpoint = None
+
+        popen_kwargs = {
+            'stdout': subprocess.PIPE,
+            'stderr': subprocess.STDOUT,
+            'text': True,
+            'bufsize': 1
+        }
+        if os.name == 'posix':
+            popen_kwargs['start_new_session'] = True
+        elif os.name == 'nt':
+            creation_flag = getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', None)
+            if creation_flag is not None:
+                popen_kwargs['creationflags'] = creation_flag
 
         try:
             if session.browser_type == BrowserType.CHROME:
@@ -139,23 +169,54 @@ def start_session(session_id):
                     '--disable-component-update',  # 禁用组件更新
                     '--disable-domain-reliability',
                     launch_url
-                ])
-            elif session.browser_type == BrowserType.FIREFOX:
-                process = subprocess.Popen([
-                    executable_path,
-                    f'--remote-debugging-port={debug_port}',
-                    launch_url
-                ])
-            else:
+                ], **popen_kwargs)
+            else:  # Edge
                 process = subprocess.Popen([
                     executable_path,
                     f'--remote-debugging-port={debug_port}',
                     '--no-first-run',
                     f'--user-data-dir={user_data_dir}',
+                    '--ignore-certificate-errors',
+                    '--ignore-ssl-errors',
+                    '--allow-insecure-localhost',
+                    '--disable-web-security',
                     launch_url
-                ])
+                ], **popen_kwargs)
 
             session.process_pid = process.pid
+            session.process_group_id = process.pid if os.name == 'posix' else None
+
+            def _capture_browser_output():
+                if not process.stdout:
+                    return
+                try:
+                    for raw_line in iter(process.stdout.readline, ''):
+                        if not raw_line:
+                            break
+                        line = raw_line.strip()
+                        if not line:
+                            continue
+                        logger.debug(f'[Browser:{session_id}] {line}')
+                        lowered = line.lower()
+                        if 'devtools listening on' in lowered:
+                            idx = lowered.find('devtools listening on')
+                            endpoint = line[idx + len('devtools listening on'):].strip(' :')
+                            session.devtools_ws_endpoint = endpoint
+                        elif 'listening on ws://' in lowered:
+                            parts = line.split('ws://', 1)
+                            if len(parts) == 2:
+                                session.devtools_ws_endpoint = 'ws://' + parts[1].strip()
+                except Exception as output_err:
+                    logger.debug(f'Browser output reader ended: {output_err}')
+                finally:
+                    try:
+                        process.stdout.close()
+                    except Exception:
+                        pass
+
+            output_thread = threading.Thread(target=_capture_browser_output, daemon=True)
+            output_thread.start()
+
             session.update_status(SessionStatus.RUNNING)
             logger.info(f'Browser launched successfully for session: {session_id} on port {debug_port}')
 
@@ -175,10 +236,18 @@ def start_session(session_id):
                         time.sleep(0.2)
                 return False
 
+            port_timeout = 3.0 if session.browser_type == BrowserType.CHROME else 12.0
+
             def run_debugging():
-                if not wait_for_debug_port(debug_port):
-                    logger.error(f'Debug port {debug_port} not ready in time for session {session_id}')
-                    session.update_status(SessionStatus.ERROR, 'Browser debug port not ready')
+                if not wait_for_debug_port(debug_port, timeout=port_timeout):
+                    error_msg = f'调试端口 {debug_port} 在 {port_timeout}秒 内未就绪'
+                    logger.error(f'Session {session_id}: {error_msg}')
+                    session.update_status(SessionStatus.ERROR, error_msg)
+                    socketio.emit('debug_error', {
+                        'session_id': session_id,
+                        'error': error_msg,
+                        'details': f'浏览器类型: {session.browser_type.value}, 端口: {debug_port}'
+                    }, room=session_id)
                     return
                 try:
                     from modules.cdp.cdp_client import CDPClient
@@ -191,25 +260,40 @@ def start_session(session_id):
                     async def debug_task():
                         client = None
                         try:
+                            logger.info(f'Session {session_id}: Attempting to connect to {session.browser_type.value} on port {debug_port}')
+                            logger.info(f'Session {session_id}: User data dir: {session.user_data_dir}')
+                            logger.info(f'Session {session_id}: Known WS endpoint: {session.devtools_ws_endpoint}')
+
                             client = await CDPClient.connect_to_existing(
                                 target_url,
                                 port=debug_port,
-                                auto_navigate=False
+                                auto_navigate=False,
+                                browser_type=session.browser_type.value,
+                                user_data_dir=session.user_data_dir,
+                                known_ws_endpoint=session.devtools_ws_endpoint
                             )
+                            logger.info(f'Session {session_id}: Successfully connected to CDP')
                             session_manager.set_runtime(session_id, asyncio.get_running_loop(), client)
 
                             if session.is_xhr_mode:
+                                logger.info(f'Session {session_id}: Setting up XHR mode breakpoints')
                                 xhr_url = session.config.xhr_url or ''
+
+                                # 先设置XHR断点监听器
                                 await set_xhr_breakpoint(client.client, xhr_url)
+                                logger.info(f'Session {session_id}: XHR breakpoint set for: {xhr_url}')
+
                                 socketio.emit('breakpoint_set', {
                                     'session_id': session_id,
                                     'mode': 'xhr',
                                     'url_pattern': xhr_url
                                 }, room=session_id)
+
                                 js_ready_event = asyncio.Event()
                                 xhr_task = asyncio.create_task(
                                     set_xhr_new_breakpoint(client.client, xhr_url, js_ready_event)
                                 )
+
                                 async def notify_xhr_ready():
                                     try:
                                         await xhr_task
@@ -223,26 +307,43 @@ def start_session(session_id):
                                             'error': str(e)
                                         }, room=session_id)
                                 asyncio.create_task(notify_xhr_ready())
-                                try:
-                                    await client.client.send("Page.reload", {"ignoreCache": True})
-                                except Exception:
-                                    pass
+
+                                # XHR模式不需要立即reload,等待XHR请求自然触发
+                                logger.info(f'Session {session_id}: XHR breakpoint ready, waiting for requests...')
+
                             elif session.is_js_mode:
+                                logger.info(f'Session {session_id}: Setting up JS mode breakpoints')
                                 js_file = session.config.js_file
                                 if js_file and session.config.effective_line is not None:
-                                    await set_breakpoint(
-                                        client.client,
-                                        js_file,
-                                        session.config.line_0based,
-                                        session.config.column_0based
-                                    )
-                                    socketio.emit('breakpoint_set', {
-                                        'session_id': session_id,
-                                        'mode': 'js',
-                                        'file': js_file,
-                                        'line': session.config.effective_line,
-                                        'column': session.config.column_0based
-                                    }, room=session_id)
+                                    # 直接使用setBreakpointByUrl - CDP会在脚本加载时自动设置断点
+                                    # 不需要等待脚本加载,也不需要监听器
+                                    logger.info(f'Session {session_id}: Setting breakpoint: {js_file}:{session.config.effective_line}')
+
+                                    try:
+                                        await set_breakpoint(
+                                            client.client,
+                                            js_file,
+                                            session.config.line_0based,
+                                            session.config.column_0based
+                                        )
+                                        logger.info(f'Session {session_id}: Breakpoint configured, will activate on script load')
+
+                                        socketio.emit('breakpoint_set', {
+                                            'session_id': session_id,
+                                            'mode': 'js',
+                                            'file': js_file,
+                                            'line': session.config.effective_line,
+                                            'column': session.config.column_0based,
+                                            'status': 'configured'
+                                        }, room=session_id)
+
+                                    except Exception as bp_err:
+                                        logger.error(f'Session {session_id}: Failed to set breakpoint: {bp_err}')
+                                        socketio.emit('breakpoint_error', {
+                                            'session_id': session_id,
+                                            'error': str(bp_err)
+                                        }, room=session_id)
+                                        raise
 
                             ai_provider = session.ai_provider
                             def on_event(name, payload):
@@ -284,8 +385,25 @@ def start_session(session_id):
                                 )
 
                         except Exception as e:
-                            logger.error(f'Debugging error for session {session_id}: {e}')
-                            session.update_status(SessionStatus.ERROR, str(e))
+                            error_msg = str(e)
+                            logger.error(f'Debugging error for session {session_id}: {error_msg}', exc_info=True)
+
+                            # 为特定错误提供更友好的消息
+                            if '无法连接到浏览器' in error_msg or 'Failed to connect' in error_msg:
+                                error_msg = (
+                                    f"{error_msg}\n\n"
+                                    "可能的解决方案:\n"
+                                    "1. 确认浏览器已成功启动\n"
+                                    "2. 检查浏览器可执行文件路径是否正确\n"
+                                    "3. 确保没有其他程序占用调试端口\n"
+                                    "4. 尝试使用浏览器的默认安装路径"
+                                )
+
+                            session.update_status(SessionStatus.ERROR, error_msg)
+                            socketio.emit('debug_error', {
+                                'session_id': session_id,
+                                'error': error_msg
+                            }, room=session_id)
                         finally:
                             try:
                                 if client:
@@ -296,8 +414,13 @@ def start_session(session_id):
                     asyncio.run(debug_task())
 
                 except Exception as e:
-                    logger.error(f'Failed to run debugging for session {session_id}: {e}')
-                    session.update_status(SessionStatus.ERROR, str(e))
+                    error_msg = str(e)
+                    logger.error(f'Failed to run debugging for session {session_id}: {error_msg}', exc_info=True)
+                    session.update_status(SessionStatus.ERROR, error_msg)
+                    socketio.emit('debug_error', {
+                        'session_id': session_id,
+                        'error': error_msg
+                    }, room=session_id)
                 finally:
                     if session.status in (SessionStatus.RUNNING, SessionStatus.CREATED):
                         session.update_status(SessionStatus.COMPLETED)
@@ -357,6 +480,7 @@ def stop_session(session_id):
             session_manager.clear_runtime(session_id)
 
         browser_closed = False
+
         if session.process_pid:
             try:
                 proc = psutil.Process(session.process_pid)
@@ -381,6 +505,34 @@ def stop_session(session_id):
             finally:
                 session.process_pid = None
 
+        def terminate_by_profile(profile_dir: str) -> bool:
+            matched = []
+            for proc in psutil.process_iter(['pid', 'cmdline']):
+                try:
+                    cmdline = proc.info.get('cmdline') or []
+                    if any(profile_dir in (arg or '') for arg in cmdline):
+                        matched.append(proc)
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+            if not matched:
+                return False
+            for proc in matched:
+                try:
+                    proc.terminate()
+                except Exception:
+                    pass
+            _, alive = psutil.wait_procs(matched, timeout=3)
+            for proc in alive:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+            return True
+
+        if not browser_closed and session.user_data_dir:
+            if terminate_by_profile(session.user_data_dir):
+                browser_closed = True
+
         if session.user_data_dir:
             try:
                 shutil.rmtree(session.user_data_dir, ignore_errors=True)
@@ -389,6 +541,8 @@ def stop_session(session_id):
             finally:
                 session.user_data_dir = None
         session.debug_port = None
+        session.process_group_id = None
+        session.devtools_ws_endpoint = None
 
         session.update_status(SessionStatus.STOPPED)
         from backend.app import socketio
