@@ -118,15 +118,7 @@
             if (Object.hasOwn(arguments[0], "$super") && Object.hasOwn(arguments[1], "callee")) {
                 // 增加更多的过滤条件，防止误报
                 const callerStr = this.toString();
-                if (callerStr.indexOf('function()') !== -1 || /^
-    *function(?:
-    *)?
-    *[A-Za-z_$][\w$]*
-    *\([^)]*\)
-    *\{
-/.test(callerStr) || /^
-    *function\s*\(\s*\)\s*\{
-/.test(callerStr)) {
+                if (callerStr.indexOf('function()') !== -1 || /^\s*function(?:\s*)?\s*[A-Za-z_$][\w$]*\s*\([^)]*\)\s*\{/.test(callerStr) || /^\s*function\s*\(\s*\)\s*\{/.test(callerStr)) {
                     
                     console.log("[debug] ========== CryptoJS 对称加密 ==========");
                     
