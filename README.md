@@ -19,7 +19,6 @@
 - Python 3.11+
 - 支持的浏览器（至少安装一种）：
   - Google Chrome浏览器
-  - Mozilla Firefox浏览器
   - Microsoft Edge浏览器
 - 大模型API密钥（兼容OpenAI的API请求格式，如Qwen、deepseek、Chatgpt、Claude等，可自定义添加）
 
