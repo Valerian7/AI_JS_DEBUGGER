@@ -169,7 +169,6 @@ class Config:
             'browser': {
                 'default': 'chrome',
                 'chrome_path': None,  # 自动检测
-                'firefox_path': None,
                 'edge_path': None
             },
             'debug': {
