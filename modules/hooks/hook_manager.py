@@ -5,9 +5,12 @@ Hook 脚本管理器
 
 import os
 import glob
+import logging
 from typing import List, Dict
 from pathlib import Path
 from backend.config import config as backend_config
+
+logger = logging.getLogger(__name__)
 
 
 class HookManager:
@@ -37,7 +40,7 @@ class HookManager:
             字典，key 为文件名，value 为脚本内容
         """
         if not self.hooks_dir.exists():
-            print(f"Warning: Hooks directory does not exist: {self.hooks_dir}")
+            logger.warning(f"Hooks directory does not exist: {self.hooks_dir}")
             self.hooks.clear()
             self._loaded_signature = None
             return self.hooks
@@ -62,9 +65,9 @@ class HookManager:
                 with open(js_file, 'r', encoding='utf-8') as f:
                     content = f.read()
                     self.hooks[js_file.name] = content
-                    print(f"✓ Loaded hook script: {js_file.name} ({len(content)} chars)")
+                    logger.info(f"✓ Loaded hook script: {js_file.name} ({len(content)} chars)")
             except Exception as e:
-                print(f"✗ Failed to load hook script {js_file.name}: {e}")
+                logger.error(f"✗ Failed to load hook script {js_file.name}: {e}")
 
         return self.hooks
 
