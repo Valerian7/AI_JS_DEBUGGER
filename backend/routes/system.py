@@ -80,7 +80,9 @@ def clear_memory():
 def get_system_stats():
     """获取系统统计信息"""
     try:
-        cpu_percent = psutil.cpu_percent(interval=1)
+        # interval=None 非阻塞模式，返回自上次调用以来的系统 CPU 利用率
+        # 首次调用可能返回 0.0，前端轮询时后续调用将返回准确值
+        cpu_percent = psutil.cpu_percent(interval=None)
         disk_usage = psutil.disk_usage('/')
 
         return jsonify({
