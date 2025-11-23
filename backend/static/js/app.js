@@ -509,7 +509,6 @@ document.head.appendChild(style);
 
 async function saveBrowserConfig() {
     const chromePath = document.getElementById('chrome-path')?.value || null;
-    const firefoxPath = document.getElementById('firefox-path')?.value || null;
     const edgePath = document.getElementById('edge-path')?.value || null;
 
     try {
@@ -520,7 +519,6 @@ async function saveBrowserConfig() {
             },
             body: JSON.stringify({
                 chrome_path: chromePath,
-                firefox_path: firefoxPath,
                 edge_path: edgePath
             })
         });
@@ -703,7 +701,6 @@ async function loadSettings() {
             const data = browserResult.data;
             if (document.getElementById('chrome-path')) {
                 document.getElementById('chrome-path').value = data.chrome_path || '';
-                document.getElementById('firefox-path').value = data.firefox_path || '';
                 document.getElementById('edge-path').value = data.edge_path || '';
             }
         }
@@ -765,7 +762,6 @@ tryInitWebSocket();
 
 const browserNameMap = {
     chrome: 'Chrome',
-    firefox: 'Firefox',
     edge: 'Edge'
 };
 
