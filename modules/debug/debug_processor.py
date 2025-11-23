@@ -3,34 +3,43 @@ import json
 import jsbeautifier
 import gc
 import re
+from urllib.parse import urlparse
 from typing import Dict, List, Optional, Any
-from modules.utils import get_cached_script_source, set_cached_script_source, measure_time
+from modules.utils import get_cached_script_source, set_cached_script_source, measure_time, performance_monitor
 from modules.memory_manager import memory_manager, process_in_chunks
 
 
 async def set_xhr_breakpoint(client, xhr_url="*"):
     """设置XHR请求断点
-    
+
     Args:
         client: CDP客户端会话
         xhr_url: 要监听的XHR请求URL，默认为"*"表示监听所有XHR请求
-        
+
     注意:
         - 当XHR请求匹配指定URL时，浏览器会暂停JavaScript执行
         - 空字符串或"*"表示监听所有XHR请求
         - URL可以是部分匹配，不需要完全一致
     """
-    await client.send("DOMDebugger.setXHRBreakpoint", {"url": xhr_url})
+    try:
+        await client.send("DOMDebugger.setXHRBreakpoint", {"url": xhr_url})
+        print(f"✓ XHR断点已设置: {xhr_url or '*'}")
+    except Exception as e:
+        print(f"❌ XHR断点设置失败: {e}")
+        raise
+
+    # 尝试设置额外的XHR事件断点(可选,失败不影响主要功能)
     try:
         await client.send("DOMDebugger.setInstrumentationBreakpoint", {"eventName": "xhrReadyStateChange"})
         await client.send("DOMDebugger.setInstrumentationBreakpoint", {"eventName": "xhrLoad"})
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"⚠️  XHR instrumentation断点设置失败(可忽略): {e}")
+
     try:
         await client.send("DOMDebugger.setEventListenerBreakpoint", {"eventName": "readystatechange", "targetName": "XMLHttpRequest"})
         await client.send("DOMDebugger.setEventListenerBreakpoint", {"eventName": "load", "targetName": "XMLHttpRequest"})
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"⚠️  XHR event listener断点设置失败(可忽略): {e}")
 
 async def set_xhr_new_breakpoint(client, xhr_url, js_ready_event=None):
     """等待XHR断点触发并设置新的JS断点
@@ -108,8 +117,232 @@ async def set_xhr_new_breakpoint(client, xhr_url, js_ready_event=None):
             pass  # 忽略移除失败（可能已自动移除）
 
 
+def _normalize_url_for_match(value: Optional[str]) -> str:
+    if not value:
+        return ''
+    value = value.strip()
+    if not value:
+        return ''
+    parsed = urlparse(value)
+    if parsed.scheme:
+        netloc = parsed.netloc or ''
+        path = parsed.path or ''
+        return f"{netloc}{path}"
+    return value
+
+
+def _url_matches(script_url: str, target_url: str) -> bool:
+    if not script_url or not target_url:
+        return False
+    normalized_script = _normalize_url_for_match(script_url)
+    normalized_target = _normalize_url_for_match(target_url)
+    if not normalized_script or not normalized_target:
+        return False
+    if normalized_script == normalized_target:
+        return True
+    if normalized_script.endswith(normalized_target):
+        return True
+    if normalized_target.startswith('/') and normalized_script.endswith(normalized_target):
+        return True
+    return False
+
+
+def _get_cached_script_ids(client, target_url: str) -> List[str]:
+    registry = getattr(client, '_script_registry', {})
+    matches: List[str] = []
+    if not registry or not target_url:
+        return matches
+    for url, script_ids in registry.items():
+        if _url_matches(str(url), target_url):
+            matches.extend(script_ids)
+    return matches
+
+
+def _remove_event_listener(client, event_name: str, handler):
+    for attr in ('remove_listener', 'removeListener', 'off'):
+        remover = getattr(client, attr, None)
+        if callable(remover):
+            try:
+                remover(event_name, handler)
+                return
+            except Exception:
+                continue
+
+
+async def _await_script_id(client, target_url: str, timeout: float = 15.0, retry_count: int = 2) -> Optional[str]:
+    """等待目标脚本被解析并返回其scriptId
+
+    优化:
+    - 增加默认超时时间到15秒(从5秒)
+    - 添加重试机制
+    - 改进日志记录
+
+    Args:
+        client: CDP客户端
+        target_url: 目标脚本URL
+        timeout: 单次等待超时时间(秒)
+        retry_count: 重试次数
+
+    Returns:
+        脚本ID或None
+    """
+    existing = _get_cached_script_ids(client, target_url)
+    if existing:
+        print(f"✓ 在缓存中找到脚本ID: {existing[0]}")
+        return existing[0]
+
+    for attempt in range(retry_count):
+        if attempt > 0:
+            print(f"重试等待脚本 ({attempt + 1}/{retry_count})...")
+
+        loop = asyncio.get_event_loop()
+        future = loop.create_future()
+
+        def handler(event):
+            try:
+                script_url = event.get('url') or ''
+                script_id = event.get('scriptId')
+                if script_id and _url_matches(script_url, target_url) and not future.done():
+                    print(f"✓ 检测到目标脚本: {script_url} (ID: {script_id})")
+                    future.set_result(script_id)
+            except Exception as e:
+                print(f"处理scriptParsed事件时出错: {e}")
+
+        client.on('Debugger.scriptParsed', handler)
+        try:
+            result = await asyncio.wait_for(future, timeout)
+            return result
+        except asyncio.TimeoutError:
+            if attempt == retry_count - 1:
+                print(f"⚠️ 等待脚本超时: {target_url} (尝试了{retry_count}次)")
+                return None
+            await asyncio.sleep(1)  # 重试前等待1秒
+        finally:
+            _remove_event_listener(client, 'Debugger.scriptParsed', handler)
+
+    return None
+
+
+async def _set_breakpoint_with_script_id(client, script_id: str, line_number: int, column_number: int, condition: str = ""):
+    location = {
+        "scriptId": script_id,
+        "lineNumber": line_number,
+        "columnNumber": column_number
+    }
+    if condition:
+        location["condition"] = condition
+    return await client.send("Debugger.setBreakpoint", {"location": location})
+
+
+async def set_breakpoint_on_load(client, url_or_regex, line_number=0, column_number=0, condition="", is_regex=False, timeout=20.0):
+    """优化版:在脚本加载时立即设置断点(使用scriptParsed监听器)
+
+    此函数会先注册scriptParsed监听器,然后在脚本加载时立即设置断点,
+    确保不会错过早期执行的代码。特别适合处理混淆代码和快速执行的脚本。
+
+    Args:
+        client: CDP客户端会话
+        url_or_regex: JavaScript文件的URL或URL正则表达式
+        line_number: 断点行号（0-based）
+        column_number: 断点列号（0-based）
+        condition: 可选的断点条件表达式
+        is_regex: 是否将url_or_regex作为正则表达式处理
+        timeout: 等待脚本加载的超时时间(秒)
+
+    Returns:
+        dict: 包含断点ID和实际位置的结果对象
+    """
+    print(f"📍 正在注册断点监听器: {url_or_regex}:{line_number+1}:{column_number+1}")
+
+    # 首先尝试在已加载的脚本上设置断点
+    existing_ids = _get_cached_script_ids(client, url_or_regex)
+    if existing_ids:
+        print(f"✓ 脚本已加载,立即设置断点 (scriptId: {existing_ids[0]})")
+        try:
+            result = await _set_breakpoint_with_script_id(client, existing_ids[0], line_number, column_number, condition)
+            print(f"✓ 断点设置成功: {url_or_regex}:{line_number+1}:{column_number+1}")
+            return result
+        except Exception as e:
+            print(f"⚠️ 在已加载脚本上设置断点失败: {e}")
+
+    # 注册监听器,等待脚本加载
+    loop = asyncio.get_event_loop()
+    future = loop.create_future()
+    breakpoint_set = False
+
+    def handler(event):
+        nonlocal breakpoint_set
+        try:
+            script_url = event.get('url') or ''
+            script_id = event.get('scriptId')
+
+            if not script_id:
+                return
+
+            # 检查URL是否匹配
+            is_match = False
+            if is_regex:
+                import re
+                try:
+                    if re.search(url_or_regex, script_url):
+                        is_match = True
+                except Exception:
+                    pass
+            else:
+                is_match = _url_matches(script_url, url_or_regex)
+
+            if is_match and not breakpoint_set and not future.done():
+                breakpoint_set = True
+                print(f"✓ 检测到目标脚本,立即设置断点: {script_url} (ID: {script_id})")
+
+                # 在协程中设置断点
+                async def set_bp():
+                    try:
+                        result = await _set_breakpoint_with_script_id(client, script_id, line_number, column_number, condition)
+                        future.set_result(result)
+                        print(f"✓ 断点设置成功: {url_or_regex}:{line_number+1}:{column_number+1}")
+                    except Exception as e:
+                        if not future.done():
+                            future.set_exception(e)
+
+                asyncio.create_task(set_bp())
+        except Exception as e:
+            print(f"处理scriptParsed事件时出错: {e}")
+            if not future.done():
+                future.set_exception(e)
+
+    client.on('Debugger.scriptParsed', handler)
+    try:
+        result = await asyncio.wait_for(future, timeout)
+        return result
+    except asyncio.TimeoutError:
+        print(f"⚠️ 等待脚本加载超时: {url_or_regex}")
+        raise RuntimeError(f"等待脚本加载超时: {url_or_regex}")
+    finally:
+        _remove_event_listener(client, 'Debugger.scriptParsed', handler)
+
+
 async def set_breakpoint(client, url_or_regex, line_number=0, column_number=0, condition="", is_regex=False):
     """在指定URL或匹配正则表达式的JavaScript文件中设置断点
+
+    使用CDP的Debugger.setBreakpointByUrl命令,这是设置断点的标准方法。
+
+    关键特性:
+    1. 断点会"注册"到CDP,在匹配的脚本加载时自动生效
+    2. 即使脚本当前未加载,断点也会在未来脚本加载时自动设置
+    3. 支持URL模式匹配,可以匹配动态加载的脚本
+    4. 多次加载同一脚本时,断点会在每次加载时都生效
+
+    正确的使用流程:
+    1. 连接到CDP
+    2. 调用此函数设置断点(此时脚本可能还未加载)
+    3. 导航页面或reload
+    4. 当匹配的脚本加载时,断点自动生效
+
+    不需要:
+    - 等待脚本加载
+    - 监听scriptParsed事件
+    - 使用scriptId设置断点(除非URL匹配失败)
 
     Args:
         client: CDP客户端会话
@@ -123,26 +356,34 @@ async def set_breakpoint(client, url_or_regex, line_number=0, column_number=0, c
         dict: 包含断点ID和实际位置的结果对象
 
     Raises:
-        Exception: 设置断点失败时抛出异常，但会被捕获并打印错误信息
+        Exception: 设置断点失败时抛出异常
     """
+    payload = {
+        "lineNumber": line_number,
+        "columnNumber": column_number,
+    }
+    if condition:
+        payload["condition"] = condition
+
+    command = {"urlRegex": url_or_regex} if is_regex else {"url": url_or_regex}
+    payload.update(command)
+
     try:
-        if is_regex:
-            result = await client.send("Debugger.setBreakpointByUrl", {
-                "urlRegex": url_or_regex,  # URL正则表达式
-                "lineNumber": line_number,  # 行号（0-based）
-                "columnNumber": column_number,  # 列号（0-based）
-                "condition": condition  # 断点条件
-            })
+        result = await client.send("Debugger.setBreakpointByUrl", payload)
+        locations = result.get("locations", [])
+
+        if locations:
+            # 断点已在当前加载的脚本上设置
+            print(f"✓ 断点已设置 (脚本已加载): {url_or_regex}:{line_number+1}:{column_number+1}")
         else:
-            result = await client.send("Debugger.setBreakpointByUrl", {
-                "url": url_or_regex,  # 精确URL
-                "lineNumber": line_number,  # 行号（0-based）
-                "columnNumber": column_number,  # 列号（0-based）
-                "condition": condition  # 断点条件
-            })
+            # 断点已配置,将在脚本加载时生效
+            print(f"✓ 断点已配置 (将在脚本加载时生效): {url_or_regex}:{line_number+1}:{column_number+1}")
+
         return result
-    except Exception as e:
-        return None
+    except Exception as err:
+        error_msg = f"设置断点失败: {url_or_regex}:{line_number+1}:{column_number+1} - {err}"
+        print(f"❌ {error_msg}")
+        raise RuntimeError(error_msg) from err
 
 def should_skip_property(name: str, value_obj: dict) -> bool:
     """判断属性是否应被跳过（跳过不必要的数据）"""
@@ -262,6 +503,87 @@ async def extract_array_values(value_obj: dict, client, max_items: int = 5):
         extra = max(extra, length_hint - len(values))
 
     return values, max(0, extra)
+
+def detect_jsvmp_patterns(source: str) -> dict:
+    """检测JavaScript虚拟机保护(JSVMP)和代码混淆模式
+
+    JSVMP特征:
+    - 大量switch-case语句
+    - 密集的数组访问模式
+    - 频繁使用eval/Function
+    - 短变量名和混淆标识符
+    - 字符串拼接和编码
+
+    Returns:
+        dict: 包含检测结果和建议的字典
+    """
+    if not source or len(source) < 100:
+        return {"is_obfuscated": False, "confidence": 0.0, "patterns": [], "suggestions": []}
+
+    patterns_found = []
+    score = 0.0
+
+    # 检测大量switch-case (JSVMP核心特征)
+    switch_count = source.count('switch')
+    case_count = source.count('case ')
+    if switch_count > 5 and case_count > 50:
+        patterns_found.append(f"大量switch-case结构 ({switch_count}个switch, {case_count}个case)")
+        score += 0.3
+
+    # 检测数组访问模式 (指令调度)
+    array_access_pattern = re.findall(r'\[\d+\]|\[0x[0-9a-fA-F]+\]|\[[_$a-zA-Z][_$\w]*\[', source)
+    if len(array_access_pattern) > 100:
+        patterns_found.append(f"密集数组访问 ({len(array_access_pattern)}处)")
+        score += 0.25
+
+    # 检测eval/Function使用
+    eval_count = source.count('eval(') + source.count('Function(')
+    if eval_count > 3:
+        patterns_found.append(f"动态代码执行 ({eval_count}处eval/Function)")
+        score += 0.15
+
+    # 检测短变量名比例 (高度混淆)
+    short_var_pattern = re.findall(r'\b[_$][a-zA-Z0-9]{0,2}\b', source)
+    if len(short_var_pattern) > 50:
+        ratio = len(short_var_pattern) / max(len(source.split()), 1)
+        if ratio > 0.1:
+            patterns_found.append(f"高比例短变量名 ({len(short_var_pattern)}个)")
+            score += 0.15
+
+    # 检测字符串编码/混淆
+    encoded_strings = re.findall(r'\\x[0-9a-fA-F]{2}|\\u[0-9a-fA-F]{4}', source)
+    if len(encoded_strings) > 20:
+        patterns_found.append(f"编码字符串 ({len(encoded_strings)}处)")
+        score += 0.10
+
+    # 检测超长单行或极短行(扁平化混淆)
+    lines = source.split('\n')
+    long_lines = sum(1 for line in lines if len(line) > 500)
+    if long_lines > 5:
+        patterns_found.append(f"代码扁平化 ({long_lines}行超长代码)")
+        score += 0.05
+
+    confidence = min(score, 1.0)
+    is_obfuscated = confidence > 0.3
+
+    suggestions = []
+    if is_obfuscated:
+        suggestions.append("检测到代码混淆/JSVMP,建议:")
+        if 'switch-case' in str(patterns_found):
+            suggestions.append("- 在switch语句开始处设置断点")
+            suggestions.append("- 关注数组变量的初始值")
+        if 'eval' in str(patterns_found) or 'Function' in str(patterns_found):
+            suggestions.append("- 在eval/Function调用前设置断点,查看传入参数")
+        suggestions.append("- 使用step_over而非step_into减少进入混淆代码")
+        suggestions.append("- 重点关注XHR/Fetch请求和响应处理")
+
+    return {
+        "is_obfuscated": is_obfuscated,
+        "confidence": confidence,
+        "patterns": patterns_found,
+        "suggestions": suggestions
+    }
+
 
 async def get_script_source(client, script_id: str) -> str:
     """
@@ -497,7 +819,10 @@ async def process_debugger_paused(event, client, session_config=None):
     - 实现增量数据收集，避免一次性加载大量数据
     - 添加内存使用监控和主动垃圾回收
     - 对大型调用堆栈和作用域进行更严格的过滤
+    - 添加性能监控
     """
+    performance_monitor.start('process_debugger_paused')
+
     memory_info = memory_manager.get_memory_info()
     high_memory_usage = memory_info['percent'] > 70
 
@@ -536,13 +861,33 @@ async def process_debugger_paused(event, client, session_config=None):
     line_number = top_frame["location"]["lineNumber"]
     col_number = top_frame["location"].get("columnNumber", 0)
     function_name = top_frame.get("functionName") or "<匿名函数>"
-    
+
     max_call_frames = 3 if high_memory_usage else 5
     max_scope_frames = 1 if high_memory_usage else 2
-    
+
     script_url = await get_script_url_by_id(client, script_id)
     debug_info += f"📍 暂停位置: {function_name} 在 {script_url}\n"
     debug_info += f"📍 具体位置: 行 {line_number+1}, 列 {col_number+1}\n\n"
+
+    # JSVMP/混淆检测
+    try:
+        source = await get_script_source(client, script_id)
+        if source:
+            obfuscation_info = detect_jsvmp_patterns(source)
+            if obfuscation_info["is_obfuscated"]:
+                debug_info += "⚠️  代码混淆检测:\n"
+                debug_info += f"   混淆置信度: {obfuscation_info['confidence']:.0%}\n"
+                if obfuscation_info['patterns']:
+                    debug_info += "   检测到的模式:\n"
+                    for pattern in obfuscation_info['patterns']:
+                        debug_info += f"     • {pattern}\n"
+                if obfuscation_info['suggestions']:
+                    debug_info += "   调试建议:\n"
+                    for suggestion in obfuscation_info['suggestions'][1:]:  # 跳过第一个总标题
+                        debug_info += f"     {suggestion}\n"
+                debug_info += "\n"
+    except Exception as e:
+        print(f"JSVMP检测失败: {e}")
     
     code_context = await get_code_context(client, script_id, line_number, col_number)
     debug_info += "📝 代码上下文:\n"
@@ -634,7 +979,15 @@ async def process_debugger_paused(event, client, session_config=None):
         debug_info += "  [作用域中未找到相关变量]\n"
     
     debug_info += f"\n{divider}\n"
+
+    # 性能统计
+    elapsed = performance_monitor.end('process_debugger_paused')
+    if elapsed > 0.5:  # 如果处理时间超过0.5秒,记录警告
+        print(f"⚠️  断点处理耗时: {elapsed:.2f}秒 (较慢)")
+    else:
+        print(f"✓ 断点处理耗时: {elapsed:.2f}秒")
+
     print(debug_info)
-    
+
     gc.collect()
     return debug_info
