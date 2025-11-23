@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import Optional, Dict, Any
 from enum import Enum
 from threading import RLock
+import os
 
 
 class SessionStatus(Enum):
@@ -28,7 +29,6 @@ class BreakpointMode(Enum):
 class BrowserType(Enum):
     """浏览器类型枚举"""
     CHROME = "chrome"
-    FIREFOX = "firefox"
     EDGE = "edge"
 
 
@@ -82,7 +82,9 @@ class DebugSession:
 
     debug_port: Optional[int] = field(default=None, repr=False)
     process_pid: Optional[int] = field(default=None, repr=False)
+    process_group_id: Optional[int] = field(default=None, repr=False)
     user_data_dir: Optional[str] = field(default=None, repr=False)
+    devtools_ws_endpoint: Optional[str] = field(default=None, repr=False)
     error: Optional[str] = field(default=None, repr=False)
 
     @classmethod
@@ -159,9 +161,29 @@ class DebugSession:
 
     @property
     def browser_executable_path(self) -> Optional[str]:
-        """获取浏览器可执行路径"""
+        """获取浏览器可执行路径，优先使用自定义配置"""
         from modules.utils import get_browser_path
-        return get_browser_path(self.browser_type.value)
+        from backend.config import config as app_config
+
+        browser_key = self.browser_type.value
+        browser_cfg = app_config.get('browser', {}) or {}
+
+        env_override = os.environ.get(f'AI_DEBUGGER_{browser_key.upper()}_PATH')
+        custom_path = browser_cfg.get(f'{browser_key}_path')
+
+        for source, raw_path in (('environment', env_override), ('config', custom_path)):
+            if not raw_path:
+                continue
+            expanded_path = os.path.expanduser(raw_path.strip())
+            if os.path.exists(expanded_path):
+                return expanded_path
+            raise FileNotFoundError(f'{browser_key} 路径无效（来源：{source}），请确认 {expanded_path} 是否存在')
+
+        auto_path = get_browser_path(browser_key)
+        if auto_path:
+            return auto_path
+
+        raise FileNotFoundError(f'未找到 {browser_key} 浏览器，请在设置中配置可执行文件路径')
 
 
 @dataclass
