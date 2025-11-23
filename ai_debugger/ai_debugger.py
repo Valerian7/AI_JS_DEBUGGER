@@ -207,16 +207,24 @@ async def continuous_debugging(client, breakpoint_mode="js", duration=300, js_re
                 try:
                     
                     print("\n等待断点触发...")
+
+                    # 确定是否需要导航/reload
                     nav_url = pending_initial_navigation if (first_pause and pending_initial_navigation) else None
+                    # JS模式: 首次需要导航或reload以加载脚本
+                    # XHR模式: 不需要reload,等待XHR请求自然触发
                     trigger_reload = (first_pause and breakpoint_mode == 'js' and auto_reload_on_start and not nav_url)
                     resume_flag = (first_pause and breakpoint_mode == 'xhr')
+
+                    # 首次加载给更多时间(60秒),后续断点保持30秒超时
+                    timeout_duration = 60.0 if first_pause else 30.0
+
                     debug_event = await asyncio.wait_for(
                         await_debugger_paused(
                             trigger_reload=trigger_reload,
                             resume=resume_flag,
                             initial_navigate=nav_url
                         ),
-                        timeout=30
+                        timeout=timeout_duration
                     )
                     if nav_url:
                         pending_initial_navigation = None
