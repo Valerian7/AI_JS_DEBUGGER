@@ -109,7 +109,6 @@ browser:
   chrome_path: null
   default: chrome
   edge_path: null
-  firefox_path: null
 debug:
   auto_save: true
   context_chars: 150
@@ -147,3 +146,4 @@ prompts:
 ui:
   language: zh
   theme: auto
+
