@@ -5,6 +5,7 @@
 
 from flask import Blueprint, request, jsonify
 import logging
+import re
 import uuid
 from datetime import datetime
 import asyncio
@@ -13,6 +14,8 @@ import os
 import time
 import socket
 import shutil
+from pathlib import Path
+from urllib.parse import urlparse
 
 import psutil
 from modules.debug.debug_processor import get_code_context
@@ -129,7 +132,7 @@ def start_session(session_id):
         session.user_data_dir = user_data_dir
 
         import random
-        debug_port = random.randint(9223, 9999)
+        debug_port = 0 if session.browser_type == BrowserType.CHROME else random.randint(9223, 9999)
         session.debug_port = debug_port
 
         session.devtools_ws_endpoint = None
@@ -186,9 +189,53 @@ def start_session(session_id):
             session.process_pid = process.pid
             session.process_group_id = process.pid if os.name == 'posix' else None
 
+            def _resolve_devtools_endpoint(wait_seconds: float = 4.0):
+                """尝试从DevToolsActivePort文件或stdout解析真实的调试端点和端口"""
+                nonlocal debug_port
+                resolved_ws = session.devtools_ws_endpoint
+                devtools_file = Path(user_data_dir) / "DevToolsActivePort"
+                deadline = time.time() + wait_seconds
+
+                while time.time() < deadline:
+                    if not resolved_ws:
+                        resolved_ws = session.devtools_ws_endpoint
+
+                    if not resolved_ws and devtools_file.exists():
+                        try:
+                            content = devtools_file.read_text(encoding='utf-8').splitlines()
+                            if len(content) >= 2:
+                                port_line = content[0].strip()
+                                ws_path = content[1].strip().lstrip('/')
+                                if port_line.isdigit() and ws_path:
+                                    debug_port = int(port_line)
+                                    session.debug_port = debug_port
+                                    resolved_ws = f"ws://127.0.0.1:{port_line}/{ws_path}"
+                                    session.devtools_ws_endpoint = resolved_ws
+                        except Exception as read_err:
+                            logger.debug(f'Failed to read DevToolsActivePort: {read_err}')
+
+                    if resolved_ws:
+                        try:
+                            parsed_port = urlparse(resolved_ws).port
+                            if parsed_port:
+                                debug_port = parsed_port
+                                session.debug_port = parsed_port
+                        except Exception:
+                            pass
+                        break
+
+                    time.sleep(0.2)
+
+                return resolved_ws
+
             def _capture_browser_output():
+                nonlocal debug_port
                 if not process.stdout:
                     return
+                token_pattern = re.compile(
+                    r"devtools listening on\s+(ws://[^\s]+)(?:\s+with token\s+([A-Za-z0-9-]+))?",
+                    re.IGNORECASE
+                )
                 try:
                     for raw_line in iter(process.stdout.readline, ''):
                         if not raw_line:
@@ -198,14 +245,33 @@ def start_session(session_id):
                             continue
                         logger.debug(f'[Browser:{session_id}] {line}')
                         lowered = line.lower()
-                        if 'devtools listening on' in lowered:
-                            idx = lowered.find('devtools listening on')
-                            endpoint = line[idx + len('devtools listening on'):].strip(' :')
+
+                        match = token_pattern.search(line)
+                        if match:
+                            endpoint = match.group(1).strip()
+                            token = match.group(2)
+                            if token and "token=" not in endpoint:
+                                sep = '&' if '?' in endpoint else '?'
+                                endpoint = f"{endpoint}{sep}token={token}"
+                            if '[::1]' in endpoint:
+                                endpoint = endpoint.replace('[::1]', '127.0.0.1')
                             session.devtools_ws_endpoint = endpoint
-                        elif 'listening on ws://' in lowered:
+                            try:
+                                parsed_port = urlparse(endpoint).port
+                                if parsed_port:
+                                    debug_port = parsed_port
+                                    session.debug_port = parsed_port
+                            except Exception:
+                                pass
+                            continue
+
+                        if 'listening on ws://' in lowered:
                             parts = line.split('ws://', 1)
                             if len(parts) == 2:
-                                session.devtools_ws_endpoint = 'ws://' + parts[1].strip()
+                                endpoint = 'ws://' + parts[1].strip()
+                                if '[::1]' in endpoint:
+                                    endpoint = endpoint.replace('[::1]', '127.0.0.1')
+                                session.devtools_ws_endpoint = endpoint
                 except Exception as output_err:
                     logger.debug(f'Browser output reader ended: {output_err}')
                 finally:
@@ -217,16 +283,37 @@ def start_session(session_id):
             output_thread = threading.Thread(target=_capture_browser_output, daemon=True)
             output_thread.start()
 
+            resolved_endpoint = _resolve_devtools_endpoint()
+            if resolved_endpoint:
+                logger.info(f'Session {session_id}: Resolved DevTools endpoint: {resolved_endpoint}')
+            else:
+                logger.debug(f'Session {session_id}: DevTools endpoint not resolved from file/stdout within timeout')
+
+            resolved_endpoint = _resolve_devtools_endpoint(wait_seconds=6.0)
+            if resolved_endpoint:
+                logger.info(f'Session {session_id}: Resolved DevTools endpoint: {resolved_endpoint}')
+                try:
+                    parsed_port = urlparse(resolved_endpoint).port
+                    if parsed_port:
+                        debug_port = parsed_port
+                        session.debug_port = parsed_port
+                except Exception:
+                    pass
+            else:
+                logger.debug(f'Session {session_id}: DevTools endpoint not resolved from file/stdout within timeout')
+
             session.update_status(SessionStatus.RUNNING)
             logger.info(f'Browser launched successfully for session: {session_id} on port {debug_port}')
 
             from backend.app import socketio
             socketio.emit('browser_launched', {
                 'session_id': session_id,
-                'debug_port': debug_port
+                'debug_port': session.debug_port or debug_port
             }, room=session_id)
 
             def wait_for_debug_port(port: int, timeout: float = 3.0) -> bool:
+                if not port or port <= 0:
+                    return True
                 deadline = time.time() + timeout
                 while time.time() < deadline:
                     try:
@@ -236,17 +323,19 @@ def start_session(session_id):
                         time.sleep(0.2)
                 return False
 
-            port_timeout = 3.0 if session.browser_type == BrowserType.CHROME else 12.0
+            port_timeout = 6.0 if session.browser_type == BrowserType.CHROME else 12.0
 
             def run_debugging():
-                if not wait_for_debug_port(debug_port, timeout=port_timeout):
-                    error_msg = f'调试端口 {debug_port} 在 {port_timeout}秒 内未就绪'
+                effective_port = session.debug_port or debug_port
+
+                if not wait_for_debug_port(effective_port, timeout=port_timeout):
+                    error_msg = f'调试端口 {effective_port} 在 {port_timeout}秒 内未就绪'
                     logger.error(f'Session {session_id}: {error_msg}')
                     session.update_status(SessionStatus.ERROR, error_msg)
                     socketio.emit('debug_error', {
                         'session_id': session_id,
                         'error': error_msg,
-                        'details': f'浏览器类型: {session.browser_type.value}, 端口: {debug_port}'
+                        'details': f'浏览器类型: {session.browser_type.value}, 端口: {effective_port}'
                     }, room=session_id)
                     return
                 try:
@@ -260,13 +349,27 @@ def start_session(session_id):
                     async def debug_task():
                         client = None
                         try:
-                            logger.info(f'Session {session_id}: Attempting to connect to {session.browser_type.value} on port {debug_port}')
+                            # 在连接前再尝试解析一次端点，等待 DevToolsActivePort 或 stdout token 就绪
+                            resolved_before_connect = _resolve_devtools_endpoint(wait_seconds=5.0)
+                            if resolved_before_connect:
+                                try:
+                                    parsed_port = urlparse(resolved_before_connect).port
+                                    if parsed_port:
+                                        session.debug_port = parsed_port
+                                except Exception:
+                                    pass
+
+                            effective_port_inner = session.debug_port or debug_port
+                            if resolved_before_connect:
+                                logger.info(f'Session {session_id}: Resolved DevTools endpoint before connect: {resolved_before_connect}')
+
+                            logger.info(f'Session {session_id}: Attempting to connect to {session.browser_type.value} on port {effective_port_inner}')
                             logger.info(f'Session {session_id}: User data dir: {session.user_data_dir}')
                             logger.info(f'Session {session_id}: Known WS endpoint: {session.devtools_ws_endpoint}')
 
                             client = await CDPClient.connect_to_existing(
                                 target_url,
-                                port=debug_port,
+                                port=effective_port_inner,
                                 auto_navigate=False,
                                 browser_type=session.browser_type.value,
                                 user_data_dir=session.user_data_dir,
